@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+*.spec
+*.report.json
+*_mathfixed.docx
+*_mathfixed.docm
+.DS_Store
+Thumbs.db

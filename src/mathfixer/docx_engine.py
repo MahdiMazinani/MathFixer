@@ -1,0 +1,438 @@
+from __future__ import annotations
+
+import copy
+import json
+import os
+import re
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Iterable
+from zipfile import BadZipFile, ZipFile
+
+from lxml import etree
+
+from .detector import detect_formulas
+from .models import (
+    ConversionReport,
+    ConversionWarning,
+    DetectionMode,
+    FormulaCandidate,
+    PackageSnapshot,
+)
+from .pandoc_backend import M_NS, NS, W_NS, PandocBackend
+from .pdf_export import export_docx_to_pdf
+
+
+ProgressCallback = Callable[[int, str], None]
+WORD_STORY_PATTERN = re.compile(
+    r"^word/(?:document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml$"
+)
+XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
+W = f"{{{W_NS}}}"
+M = f"{{{M_NS}}}"
+ALLOWED_RUN_CHILDREN = {f"{W}rPr", f"{W}t"}
+
+
+class UnsafeDocumentError(RuntimeError):
+    pass
+
+
+class ConversionAbortedError(RuntimeError):
+    pass
+
+
+@dataclass(slots=True)
+class ScanResult:
+    report: ConversionReport
+    story_parts: dict[str, bytes]
+
+
+def _progress(callback: ProgressCallback | None, value: int, message: str) -> None:
+    if callback:
+        callback(max(0, min(100, value)), message)
+
+
+def _validate_input(path: Path) -> None:
+    if path.suffix.lower() not in {".docx", ".docm"}:
+        raise ValueError("Input must be a .docx or .docm file.")
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    if path.stat().st_size > 1_000_000_000:
+        raise UnsafeDocumentError("The document exceeds the 1 GB safety limit.")
+    try:
+        with ZipFile(path) as archive:
+            names = set(archive.namelist())
+            if "word/document.xml" not in names or "[Content_Types].xml" not in names:
+                raise UnsafeDocumentError("The file is not a valid Word OOXML package.")
+            total = sum(item.file_size for item in archive.infolist())
+            if total > 2_000_000_000:
+                raise UnsafeDocumentError("The expanded document exceeds the 2 GB safety limit.")
+            for item in archive.infolist():
+                if item.compress_size and item.file_size / item.compress_size > 2500:
+                    raise UnsafeDocumentError(f"Suspicious compression ratio in {item.filename}.")
+    except BadZipFile as exc:
+        raise UnsafeDocumentError("The document is damaged or encrypted.") from exc
+
+
+def _story_names(archive: ZipFile) -> list[str]:
+    return sorted(name for name in archive.namelist() if WORD_STORY_PATTERN.match(name))
+
+
+def _paragraph_text(paragraph: etree._Element) -> str:
+    return "".join(paragraph.xpath("./w:r//w:t/text()", namespaces=NS))
+
+
+def _count_native_math(root: etree._Element) -> int:
+    return len(root.xpath(".//m:oMath", namespaces=NS))
+
+
+def scan_document(
+    input_path: str | os.PathLike[str],
+    *,
+    mode: DetectionMode = DetectionMode.BALANCED,
+    progress: ProgressCallback | None = None,
+) -> ScanResult:
+    path = Path(input_path).expanduser().resolve()
+    _validate_input(path)
+    report = ConversionReport(input_path=str(path), mode=mode.value)
+    story_parts: dict[str, bytes] = {}
+    _progress(progress, 2, "Opening Word package")
+    with ZipFile(path) as archive:
+        names = _story_names(archive)
+        report.scanned_parts = len(names)
+        for part_index, name in enumerate(names):
+            data = archive.read(name)
+            story_parts[name] = data
+            try:
+                root = etree.fromstring(data)
+            except etree.XMLSyntaxError as exc:
+                report.warnings.append(
+                    ConversionWarning(code="STORY_XML_INVALID", message=str(exc), part=name)
+                )
+                continue
+            report.already_native += _count_native_math(root)
+            paragraphs = root.xpath(".//w:p", namespaces=NS)
+            for paragraph_index, paragraph in enumerate(paragraphs):
+                report.scanned_paragraphs += 1
+                # Existing equations are preserved; ordinary text in the same paragraph may still be scanned.
+                text = _paragraph_text(paragraph)
+                report.candidates.extend(
+                    detect_formulas(
+                        text,
+                        part=name,
+                        paragraph_index=paragraph_index,
+                        mode=mode,
+                    )
+                )
+            _progress(
+                progress,
+                5 + int(35 * (part_index + 1) / max(1, len(names))),
+                f"Scanning {name}",
+            )
+    report.detected = len(report.candidates)
+    report.repaired = sum(bool(item.repairs) for item in report.candidates)
+    return ScanResult(report=report, story_parts=story_parts)
+
+
+def _run_is_safe(run: etree._Element) -> bool:
+    if run.tag != f"{W}r":
+        return False
+    return all(child.tag in ALLOWED_RUN_CHILDREN for child in run)
+
+
+def _run_text(run: etree._Element) -> str:
+    return "".join(run.xpath(".//w:t/text()", namespaces=NS))
+
+
+def _clone_run_with_text(run: etree._Element, text: str) -> etree._Element | None:
+    if not text:
+        return None
+    clone = etree.Element(f"{W}r", nsmap=run.nsmap)
+    properties = run.find(f"{W}rPr")
+    if properties is not None:
+        clone.append(copy.deepcopy(properties))
+    node = etree.SubElement(clone, f"{W}t")
+    node.text = text
+    if text[:1].isspace() or text[-1:].isspace():
+        node.set(XML_SPACE, "preserve")
+    return clone
+
+
+def _replace_span(
+    paragraph: etree._Element,
+    candidate: FormulaCandidate,
+    omath: etree._Element,
+) -> tuple[bool, str]:
+    children = list(paragraph)
+    cursor = 0
+    ranges: list[tuple[int, int, int, etree._Element]] = []
+    for index, child in enumerate(children):
+        text = _run_text(child) if child.tag == f"{W}r" else ""
+        if text:
+            ranges.append((cursor, cursor + len(text), index, child))
+            cursor += len(text)
+
+    first = next((item for item in ranges if item[0] <= candidate.start < item[1]), None)
+    last = next((item for item in ranges if item[0] < candidate.end <= item[1]), None)
+    if first is None or last is None:
+        return False, "formula offsets no longer map to Word text runs"
+
+    first_start, _, first_index, first_run = first
+    last_start, _, last_index, last_run = last
+    affected = children[first_index : last_index + 1]
+    if not affected or any(not _run_is_safe(child) for child in affected):
+        return False, "formula crosses a field, hyperlink, bookmark, drawing, or complex Word run"
+
+    first_text = _run_text(first_run)
+    last_text = _run_text(last_run)
+    prefix = first_text[: candidate.start - first_start]
+    suffix = last_text[candidate.end - last_start :]
+
+    for child in affected:
+        paragraph.remove(child)
+    insertion = first_index
+    prefix_run = _clone_run_with_text(first_run, prefix)
+    if prefix_run is not None:
+        paragraph.insert(insertion, prefix_run)
+        insertion += 1
+    paragraph.insert(insertion, copy.deepcopy(omath))
+    insertion += 1
+    suffix_run = _clone_run_with_text(last_run, suffix)
+    if suffix_run is not None:
+        paragraph.insert(insertion, suffix_run)
+    return True, ""
+
+
+def _snapshot(path: Path, *, story_parts: Iterable[str] = ()) -> PackageSnapshot:
+    snapshot = PackageSnapshot()
+    story_set = set(story_parts)
+    with ZipFile(path) as archive:
+        snapshot.entries = set(archive.namelist())
+        snapshot.unchanged_crc = {
+            item.filename: item.CRC for item in archive.infolist() if item.filename not in story_set
+        }
+        for name in _story_names(archive):
+            try:
+                root = etree.fromstring(archive.read(name))
+            except etree.XMLSyntaxError:
+                continue
+            snapshot.tables += len(root.xpath(".//w:tbl", namespaces=NS))
+            snapshot.drawings += len(root.xpath(".//w:drawing", namespaces=NS))
+            snapshot.pictures += len(root.xpath(".//w:pict", namespaces=NS))
+            snapshot.hyperlinks += len(root.xpath(".//w:hyperlink", namespaces=NS))
+            snapshot.bookmarks += len(root.xpath(".//w:bookmarkStart", namespaces=NS))
+            snapshot.comments += len(root.xpath(".//w:commentRangeStart", namespaces=NS))
+            snapshot.tracked_changes += len(root.xpath(".//w:ins|.//w:del", namespaces=NS))
+            snapshot.sections += len(root.xpath(".//w:sectPr", namespaces=NS))
+    return snapshot
+
+
+def _validate_output(
+    input_path: Path,
+    output_path: Path,
+    modified_parts: set[str],
+) -> dict[str, object]:
+    before = _snapshot(input_path, story_parts=modified_parts)
+    after = _snapshot(output_path, story_parts=modified_parts)
+    structure_fields = (
+        "tables",
+        "drawings",
+        "pictures",
+        "hyperlinks",
+        "bookmarks",
+        "comments",
+        "tracked_changes",
+        "sections",
+    )
+    structures = {field: getattr(before, field) == getattr(after, field) for field in structure_fields}
+    unchanged_parts = all(
+        after.unchanged_crc.get(name) == crc for name, crc in before.unchanged_crc.items()
+    )
+    package_ok = before.entries == after.entries
+    with ZipFile(output_path) as archive:
+        bad_member = archive.testzip()
+        native_math = 0
+        for name in _story_names(archive):
+            root = etree.fromstring(archive.read(name))
+            native_math += _count_native_math(root)
+    valid = package_ok and unchanged_parts and all(structures.values()) and bad_member is None
+    return {
+        "valid": valid,
+        "zip_integrity": bad_member is None,
+        "entry_set_preserved": package_ok,
+        "unmodified_parts_byte_identical": unchanged_parts,
+        "structures_preserved": structures,
+        "native_math_objects": native_math,
+        "modified_parts": sorted(modified_parts),
+    }
+
+
+def convert_document(
+    input_path: str | os.PathLike[str],
+    output_path: str | os.PathLike[str],
+    *,
+    mode: DetectionMode = DetectionMode.BALANCED,
+    enabled_candidate_ids: set[str] | None = None,
+    formula_overrides: dict[str, str] | None = None,
+    pandoc_path: str | None = None,
+    overwrite: bool = False,
+    fail_on_formula_error: bool = True,
+    create_pdf: bool = False,
+    pdf_output_path: str | os.PathLike[str] | None = None,
+    pdf_engine: str = "auto",
+    report_path: str | os.PathLike[str] | None = None,
+    progress: ProgressCallback | None = None,
+) -> ConversionReport:
+    source = Path(input_path).expanduser().resolve()
+    target = Path(output_path).expanduser().resolve()
+    if source == target:
+        raise ValueError("Output must be a different file. MathFixer never overwrites the source document.")
+    if target.exists() and not overwrite:
+        raise FileExistsError(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    scan = scan_document(source, mode=mode, progress=progress)
+    report = scan.report
+    report.output_path = str(target)
+    if enabled_candidate_ids is not None:
+        for candidate in report.candidates:
+            candidate.enabled = candidate.candidate_id in enabled_candidate_ids
+    if formula_overrides:
+        for candidate in report.candidates:
+            override = formula_overrides.get(candidate.candidate_id)
+            if override is not None and override.strip():
+                candidate.normalized = override.strip()
+                if "edited in preview" not in candidate.repairs:
+                    candidate.repairs.append("edited in preview")
+    selected = [item for item in report.candidates if item.enabled]
+    report.skipped = report.detected - len(selected)
+    _progress(progress, 43, f"Converting {len(selected)} formula(s) to Office Math")
+
+    backend = PandocBackend(pandoc_path)
+    report.pandoc_version = backend.version
+    converted, warnings = backend.convert_many(selected)
+    report.warnings.extend(warnings)
+    missing = [item for item in selected if item.candidate_id not in converted]
+    if missing and fail_on_formula_error:
+        raise ConversionAbortedError(
+            f"Atomic conversion stopped: {len(missing)} formula(s) could not be converted. "
+            "The source document was not changed. Run a scan/report to review them."
+        )
+
+    modified: dict[str, bytes] = {}
+    by_part: dict[str, list[FormulaCandidate]] = {}
+    for candidate in selected:
+        if candidate.candidate_id in converted:
+            by_part.setdefault(candidate.part, []).append(candidate)
+
+    for part_number, (part, candidates) in enumerate(by_part.items()):
+        root = etree.fromstring(scan.story_parts[part])
+        paragraphs = root.xpath(".//w:p", namespaces=NS)
+        grouped: dict[int, list[FormulaCandidate]] = {}
+        for candidate in candidates:
+            grouped.setdefault(candidate.paragraph_index, []).append(candidate)
+        for paragraph_index, paragraph_candidates in grouped.items():
+            paragraph = paragraphs[paragraph_index]
+            before_text = _paragraph_text(paragraph)
+            expected_text = before_text
+            for candidate in sorted(paragraph_candidates, key=lambda item: item.start, reverse=True):
+                expected_text = expected_text[: candidate.start] + expected_text[candidate.end :]
+                ok, reason = _replace_span(
+                    paragraph, candidate, converted[candidate.candidate_id]
+                )
+                if ok:
+                    report.converted += 1
+                else:
+                    if fail_on_formula_error:
+                        raise ConversionAbortedError(
+                            f"Atomic conversion stopped in {part}, paragraph {paragraph_index}: {reason}."
+                        )
+                    report.skipped += 1
+                    report.warnings.append(
+                        ConversionWarning(
+                            code="UNSAFE_WORD_STRUCTURE",
+                            message=reason,
+                            part=part,
+                            paragraph_index=paragraph_index,
+                            formula=candidate.source,
+                        )
+                    )
+            if _paragraph_text(paragraph) != expected_text:
+                raise ConversionAbortedError(
+                    f"Text-preservation check failed in {part}, paragraph {paragraph_index}."
+                )
+        modified[part] = etree.tostring(
+            root, xml_declaration=True, encoding="UTF-8", standalone=True
+        )
+        _progress(
+            progress,
+            64 + int(16 * (part_number + 1) / max(1, len(by_part))),
+            f"Patching {part}",
+        )
+
+    if selected and report.converted == 0:
+        raise ConversionAbortedError("No selected formula could be converted safely.")
+
+    _progress(progress, 82, "Writing an atomic, layout-preserving copy")
+    temp_handle = tempfile.NamedTemporaryFile(
+        prefix=f".{target.stem}-", suffix=target.suffix, dir=target.parent, delete=False
+    )
+    temp_path = Path(temp_handle.name)
+    temp_handle.close()
+    pdf_temp_path: Path | None = None
+    pdf_target: Path | None = None
+    pdf_result = None
+    try:
+        with ZipFile(source) as original, ZipFile(temp_path, "w") as output:
+            for info in original.infolist():
+                data = modified.get(info.filename, original.read(info.filename))
+                output.writestr(info, data)
+        report.validation = _validate_output(source, temp_path, set(modified))
+        if not report.validation.get("valid"):
+            raise ConversionAbortedError("Package-preservation validation failed; no output was published.")
+        if create_pdf:
+            pdf_target = (
+                Path(pdf_output_path).expanduser().resolve()
+                if pdf_output_path
+                else target.with_suffix(".pdf")
+            )
+            if pdf_target.exists() and not overwrite:
+                raise FileExistsError(pdf_target)
+            pdf_target.parent.mkdir(parents=True, exist_ok=True)
+            pdf_handle = tempfile.NamedTemporaryFile(
+                prefix=f".{pdf_target.stem}-",
+                suffix=".pdf",
+                dir=pdf_target.parent,
+                delete=False,
+            )
+            pdf_temp_path = Path(pdf_handle.name)
+            pdf_handle.close()
+            pdf_result = export_docx_to_pdf(
+                temp_path,
+                pdf_temp_path,
+                engine=pdf_engine,
+                overwrite=True,
+                progress=progress,
+            )
+        os.replace(temp_path, target)
+        if pdf_temp_path is not None and pdf_target is not None:
+            os.replace(pdf_temp_path, pdf_target)
+    finally:
+        temp_path.unlink(missing_ok=True)
+        if pdf_temp_path is not None:
+            pdf_temp_path.unlink(missing_ok=True)
+
+    if pdf_result is not None and pdf_target is not None:
+        report.pdf_path = str(pdf_target)
+        report.pdf_engine = pdf_result.engine
+        report.pdf_pages = pdf_result.pages
+        report.pdf_size_bytes = pdf_result.size_bytes
+
+    report.success = True
+    if report_path:
+        Path(report_path).write_text(
+            json.dumps(report.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    _progress(progress, 100, "Conversion and validation completed")
+    return report

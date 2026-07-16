@@ -1,0 +1,34 @@
+name: Bug report
+description: Report a conversion, layout, PDF, or interface problem
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Problem area
+      options:
+        - Formula detection
+        - Formula conversion
+        - Document layout
+        - PDF output
+        - Persian/English interface
+        - Windows executable
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Remove private information and attach only a minimal sample if possible.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: MathFixer version
+      placeholder: 1.1.0
+  - type: input
+    id: windows
+    attributes:
+      label: Windows and Word/LibreOffice version

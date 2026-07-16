@@ -1,0 +1,38 @@
+name: build-windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  windows-portable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Pandoc
+        run: choco install pandoc --yes --no-progress
+      - name: Build self-contained executable
+        shell: powershell
+        run: .\scripts\build_windows.ps1 -Python python
+      - name: Package beginner download
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path package -Force | Out-Null
+          Copy-Item dist\MathFixer.exe package\MathFixer.exe
+          Copy-Item THIRD_PARTY_NOTICES.md package\THIRD_PARTY_NOTICES.md
+          Copy-Item docs\BEGINNER_GUIDE_FA.html package\راهنمای-فارسی.html
+          Copy-Item docs\BEGINNER_GUIDE.html package\BEGINNER_GUIDE.html
+          Compress-Archive -Path package\* -DestinationPath MathFixer-Windows-Portable.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MathFixer-Windows-Portable
+          path: MathFixer-Windows-Portable.zip

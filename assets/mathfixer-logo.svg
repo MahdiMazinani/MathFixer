@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">MathFixer logo</title>
+  <desc id="desc">A blue rounded square with a teal sigma and a check mark</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1d4ed8"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="232" height="232" rx="52" fill="url(#bg)"/>
+  <path d="M69 57h112v29h-67l45 42-49 48h78v29H65v-25l56-52-52-47z" fill="#e6f3ff"/>
+  <path d="m145 179 17 17 39-45" fill="none" stroke="#2dd4bf" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
