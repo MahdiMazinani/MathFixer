@@ -1,14 +1,13 @@
 import shutil
 import tempfile
 import unittest
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from lxml import etree
 
 from mathfixer import DetectionMode, convert_document
-
 
 CONTENT_TYPES = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -71,20 +70,23 @@ class PreservationTests(unittest.TestCase):
                 self.assertEqual(ordinary_text, "Before  after")
                 self.assertEqual(len(root.xpath(".//w:tbl", namespaces=namespaces)), 1)
                 self.assertEqual(len(root.xpath(".//w:sectPr", namespaces=namespaces)), 1)
+                self.assertEqual(len(root.xpath(".//m:oMathPara", namespaces=namespaces)), 1)
 
     def test_pdf_failure_does_not_publish_partial_docx(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory, "source.docx")
             output = Path(directory, "output.docx")
             self.write_source(source)
-            with patch("mathfixer.docx_engine.export_docx_to_pdf", side_effect=RuntimeError("PDF failed")):
-                with self.assertRaises(RuntimeError):
-                    convert_document(
-                        source,
-                        output,
-                        mode=DetectionMode.BALANCED,
-                        create_pdf=True,
-                    )
+            with (
+                patch("mathfixer.docx_engine.export_docx_to_pdf", side_effect=RuntimeError("PDF failed")),
+                self.assertRaises(RuntimeError),
+            ):
+                convert_document(
+                    source,
+                    output,
+                    mode=DetectionMode.BALANCED,
+                    create_pdf=True,
+                )
             self.assertFalse(output.exists())
             self.assertFalse(output.with_suffix(".pdf").exists())
 

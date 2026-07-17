@@ -3,8 +3,8 @@ name: build-windows
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
 
 permissions:
   contents: read
@@ -31,8 +31,32 @@ jobs:
           Copy-Item THIRD_PARTY_NOTICES.md package\THIRD_PARTY_NOTICES.md
           Copy-Item docs\BEGINNER_GUIDE_FA.html package\راهنمای-فارسی.html
           Copy-Item docs\BEGINNER_GUIDE.html package\BEGINNER_GUIDE.html
+          Copy-Item docs\guide-fa.css package\guide-fa.css
+          Copy-Item docs\guide-en.css package\guide-en.css
+          Copy-Item CHANGELOG.md package\CHANGELOG.md
+          Copy-Item examples package\examples -Recurse
           Compress-Archive -Path package\* -DestinationPath MathFixer-Windows-Portable.zip -Force
+          (Get-FileHash MathFixer-Windows-Portable.zip -Algorithm SHA256).Hash.ToLower() + "  MathFixer-Windows-Portable.zip" | Set-Content SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: MathFixer-Windows-Portable
-          path: MathFixer-Windows-Portable.zip
+          path: |
+            MathFixer-Windows-Portable.zip
+            SHA256SUMS.txt
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows-portable
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: MathFixer-Windows-Portable
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            MathFixer-Windows-Portable.zip
+            SHA256SUMS.txt

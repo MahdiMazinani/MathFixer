@@ -5,10 +5,9 @@ import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
-
 
 ProgressCallback = Callable[[int, str], None]
 
@@ -60,6 +59,8 @@ $word = $null
 $document = $null
 try {
     $word = New-Object -ComObject Word.Application
+    # Force-disable VBA before opening any untrusted DOCX/DOCM package.
+    $word.AutomationSecurity = 3
     $word.Visible = $false
     $word.DisplayAlerts = 0
     $document = $word.Documents.Open($InputPath, $false, $true)
@@ -177,15 +178,24 @@ def export_docx_to_pdf(
     if normalized_engine not in {"auto", "word", "libreoffice"}:
         raise ValueError("PDF engine must be auto, word, or libreoffice.")
 
+    # LibreOffice's macro policy varies by installation. For macro-enabled input,
+    # only Word automation with AutomationSecurityForceDisable is accepted.
+    if source.suffix.lower() == ".docm" and normalized_engine == "libreoffice":
+        raise PdfExportError("DOCM PDF export requires Microsoft Word so macros can be force-disabled.")
+
     order = [normalized_engine]
     if normalized_engine == "auto":
-        order = ["word", "libreoffice"] if os.name == "nt" else ["libreoffice"]
+        if source.suffix.lower() == ".docm":
+            if os.name != "nt":
+                raise PdfExportError("Secure DOCM PDF export is available only with Microsoft Word on Windows.")
+            order = ["word"]
+        else:
+            order = ["word", "libreoffice"] if os.name == "nt" else ["libreoffice"]
     errors: list[str] = []
-    temp_handle = tempfile.NamedTemporaryFile(
+    with tempfile.NamedTemporaryFile(
         prefix=f".{target.stem}-", suffix=".pdf", dir=target.parent, delete=False
-    )
-    temp_path = Path(temp_handle.name)
-    temp_handle.close()
+    ) as temp_handle:
+        temp_path = Path(temp_handle.name)
     try:
         for candidate in order:
             temp_path.unlink(missing_ok=True)

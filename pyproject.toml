@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "word-mathfixer"
-version = "1.1.0"
-description = "Repair LaTeX and UnicodeMath in Word as native Office Math without rebuilding the document"
+version = "1.2.0"
+description = "Smart formula repair and scientific document assistant for Word, LaTeX, and Persian theses"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
@@ -26,7 +26,7 @@ classifiers = [
   "Topic :: Office/Business :: Office Suites",
   "Topic :: Scientific/Engineering :: Mathematics",
 ]
-dependencies = ["lxml>=5.1,<7"]
+dependencies = ["lxml>=5.1,<7", "pypdf>=4,<7"]
 
 [project.optional-dependencies]
 gui = ["PySide6-Essentials>=6.7,<7"]

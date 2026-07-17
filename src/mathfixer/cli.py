@@ -7,8 +7,11 @@ from pathlib import Path
 
 from . import __version__
 from .docx_engine import convert_document, scan_document
+from .features.latex_project import analyze_latex, repair_latex
+from .features.word_to_latex import export_word_to_latex
 from .models import DetectionMode
 from .pandoc_backend import PandocBackend, PandocNotFoundError
+from .plugins.thesis import THESIS_PROFILES
 
 
 def _mode(value: str) -> DetectionMode:
@@ -28,17 +31,18 @@ def _progress(value: int, message: str) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mathfixer",
-        description="Convert damaged LaTeX/UnicodeMath in Word to native Office Math without rebuilding the document.",
+        description="Repair formulas and scientific documents across Word, LaTeX, and Persian thesis workflows.",
     )
     parser.add_argument("--version", action="version", version=f"MathFixer {__version__}")
     subparsers = parser.add_subparsers(dest="command")
 
-    scan = subparsers.add_parser("scan", help="detect formulas without writing a DOCX")
+    scan = subparsers.add_parser("scan", help="detect Word formulas or LaTeX project issues without writing output")
     scan.add_argument("input", type=Path)
     scan.add_argument("--mode", type=_mode, default=DetectionMode.BALANCED)
     scan.add_argument("--json", dest="json_path", type=Path, help="write the full scan report")
+    scan.add_argument("--thesis-profile", choices=[item.key for item in THESIS_PROFILES], default="generic")
 
-    convert = subparsers.add_parser("convert", help="convert one or more Word documents")
+    convert = subparsers.add_parser("convert", help="repair one or more DOCX, DOCM, or TEX documents")
     convert.add_argument("inputs", nargs="+", type=Path)
     convert.add_argument("--output-dir", "-o", type=Path)
     convert.add_argument("--suffix", default="_mathfixed")
@@ -50,7 +54,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="publish successfully converted formulas even when another formula fails",
     )
-    convert.add_argument("--report", action="store_true", help="write a JSON report next to each output")
+    convert.add_argument("--report", action="store_true", help="write HTML and JSON reports next to each output")
     convert.add_argument("--pdf", action="store_true", help="also export a PDF from the repaired DOCX")
     convert.add_argument(
         "--pdf-engine",
@@ -59,6 +63,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="PDF engine; auto prefers Microsoft Word on Windows",
     )
     convert.add_argument("--quiet", action="store_true")
+    convert.add_argument("--thesis-profile", choices=[item.key for item in THESIS_PROFILES], default="generic")
+
+    word_to_latex = subparsers.add_parser("word-to-latex", help="export a Word document to standalone LaTeX")
+    word_to_latex.add_argument("input", type=Path)
+    word_to_latex.add_argument("output", type=Path)
+    word_to_latex.add_argument("--pandoc", type=str)
 
     subparsers.add_parser("doctor", help="check runtime dependencies")
     subparsers.add_parser("gui", help="launch the desktop interface")
@@ -94,7 +104,21 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print("Core: ready")
         return 0
+    if args.command == "word-to-latex":
+        output = export_word_to_latex(args.input, args.output, pandoc_path=args.pandoc)
+        print(f"OK  {args.input} -> {output}")
+        return 0
     if args.command == "scan":
+        if args.input.suffix.lower() == ".tex":
+            report = analyze_latex(args.input, thesis_profile=args.thesis_profile)
+            print(f"{args.input.name}: {report.detected} issue(s), {len(report.changes)} automatic repair(s)")
+            for change in report.changes:
+                print(f"  line {change.line}: {change.before!r} -> {change.after!r} ({change.reason})")
+            for finding in report.findings:
+                print(f"  {finding.severity.upper()} {finding.code}: {finding.message}")
+            if args.json_path:
+                args.json_path.write_text(json.dumps(report.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+            return 0
         report = scan_document(args.input, mode=args.mode, progress=_progress).report
         print(
             f"{report.input_name}: {report.detected} candidate(s), "
@@ -117,7 +141,20 @@ def main(argv: list[str] | None = None) -> int:
         output_dir = (args.output_dir or input_path.parent).resolve()
         output = output_dir / f"{input_path.stem}{args.suffix}{input_path.suffix.lower()}"
         report_path = output.with_suffix(".report.json") if args.report else None
+        html_report_path = output.with_suffix(".report.html") if args.report else None
         try:
+            if input_path.suffix.lower() == ".tex":
+                report = repair_latex(
+                    input_path,
+                    output,
+                    overwrite=args.overwrite,
+                    create_pdf=args.pdf,
+                    report_path=report_path,
+                    html_report_path=html_report_path,
+                    thesis_profile=args.thesis_profile,
+                )
+                print(f"OK  {input_path.name} -> {output} ({report.converted}/{report.detected} repaired)")
+                continue
             report = convert_document(
                 input_path,
                 output,
@@ -128,6 +165,7 @@ def main(argv: list[str] | None = None) -> int:
                 create_pdf=args.pdf,
                 pdf_engine=args.pdf_engine,
                 report_path=report_path,
+                html_report_path=html_report_path,
                 progress=None if args.quiet else _progress,
             )
             print(

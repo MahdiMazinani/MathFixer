@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.0 — 2026-07-16
+
+- Repositioned MathFixer as a formula repair and scientific document assistant.
+- Added TEX scanning and conservative fraction repair with HTML before/after reports.
+- Added Persian font, xepersian, bidi and local BibTeX citation diagnostics.
+- Added optional OpenAI diagnostics and explicit Word-to-LaTeX export.
+- Added thesis compatibility profiles and a product-focused desktop dashboard.
+- Added secure XML parsing, duplicate/encrypted ZIP rejection and native-math delta validation.
+- Force-disabled Word macros for DOCM PDF and prohibited unverified LibreOffice DOCM export.
+- Added proper block-level OMML for equation-only display formulas.
+- Expanded CI across Windows/Linux and Python 3.10–3.12 with GUI smoke, CodeQL and Dependabot.
+- Added tagged automated releases with SHA-256 checksums.
+
 ## 1.1.0 — 2026-07-16
 
 - Added complete Persian/English interface switching with right-to-left Persian layout.

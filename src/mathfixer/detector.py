@@ -6,7 +6,6 @@ from dataclasses import replace
 from .models import DetectionMode, FormulaCandidate, FormulaKind
 from .repair import repair_formula
 
-
 _EXPLICIT_PATTERNS: tuple[tuple[re.Pattern[str], FormulaKind, bool, float], ...] = (
     (re.compile(r"\$\$(.+?)\$\$", re.DOTALL), FormulaKind.LATEX_DISPLAY, True, 0.99),
     (re.compile(r"\\\[(.+?)\\\]", re.DOTALL), FormulaKind.LATEX_DISPLAY, True, 0.99),
@@ -57,9 +56,7 @@ def _is_broken_formula_paragraph(text: str) -> bool:
         return True
     if dollars % 2 and _math_score(stripped) >= 4.0 and len(_WORD.findall(stripped)) <= 3:
         return True
-    if (r"\begin{}" in stripped or r"\end{}" in stripped) and _math_score(stripped) >= 3.0:
-        return True
-    return False
+    return (r"\begin{}" in stripped or r"\end{}" in stripped) and _math_score(stripped) >= 3.0
 
 
 def _candidate(
@@ -107,7 +104,9 @@ def detect_formulas(
     if not text.strip():
         return candidates
 
-    if _is_broken_formula_paragraph(text):
+    # Safe mode has a strict contract: only complete, explicit delimiters are accepted.
+    # Conservative repair of malformed delimiters belongs to balanced/aggressive modes.
+    if mode is not DetectionMode.SAFE and _is_broken_formula_paragraph(text):
         start = len(text) - len(text.lstrip())
         end = len(text.rstrip())
         return [
@@ -185,6 +184,26 @@ def detect_formulas(
                 FormulaKind.PLAIN_EQUATION,
                 len(stripped) > 24,
                 min(0.91, 0.72 + score / 45),
+            )
+        )
+    elif (
+        mode is DetectionMode.BALANCED
+        and whole_available
+        and _MATH_SYMBOL.search(stripped)
+        and score >= 4.5
+        and len(_WORD.findall(stripped)) <= 2
+        and len(stripped) <= 160
+    ):
+        candidates.append(
+            _candidate(
+                text,
+                part,
+                paragraph_index,
+                leading,
+                trailing,
+                FormulaKind.UNICODE_MATH,
+                len(stripped) > 24,
+                min(0.90, 0.74 + score / 55),
             )
         )
     elif (

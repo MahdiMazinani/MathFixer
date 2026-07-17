@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+  <defs><linearGradient id="bg" x1="0" x2="1"><stop stop-color="#07101d"/><stop offset="1" stop-color="#10243b"/></linearGradient></defs>
+  <rect width="1200" height="700" rx="26" fill="url(#bg)"/>
+  <text x="62" y="72" fill="#fff" font-family="Segoe UI,Tahoma" font-size="36" font-weight="700">MathFixer</text>
+  <text x="62" y="108" fill="#9db2c8" font-family="Segoe UI,Tahoma" font-size="18">Smart formula repair &amp; scientific document assistant</text>
+  <g font-family="Segoe UI,Tahoma"><rect x="62" y="142" width="250" height="90" rx="14" fill="#122238" stroke="#28415e"/><text x="82" y="174" fill="#8fa6bf" font-size="16">Problems found</text><text x="82" y="215" fill="#5eead4" font-size="34" font-weight="700">15</text>
+  <rect x="328" y="142" width="250" height="90" rx="14" fill="#122238" stroke="#28415e"/><text x="348" y="174" fill="#8fa6bf" font-size="16">Changes applied</text><text x="348" y="215" fill="#5eead4" font-size="34" font-weight="700">8</text>
+  <rect x="594" y="142" width="250" height="90" rx="14" fill="#122238" stroke="#28415e"/><text x="614" y="174" fill="#8fa6bf" font-size="16">Warnings</text><text x="614" y="215" fill="#fbbf24" font-size="34" font-weight="700">3</text>
+  <rect x="860" y="142" width="278" height="90" rx="14" fill="#122238" stroke="#28415e"/><text x="880" y="174" fill="#8fa6bf" font-size="16">Output files</text><text x="880" y="215" fill="#5eead4" font-size="34" font-weight="700">2</text></g>
+  <rect x="62" y="258" width="730" height="365" rx="18" fill="#0d1a2a" stroke="#3b82f6" stroke-width="2" stroke-dasharray="10 8"/>
+  <text x="427" y="338" text-anchor="middle" fill="#40d7bd" font-family="Cambria Math" font-size="52">∑</text>
+  <text x="427" y="386" text-anchor="middle" fill="#fff" font-family="Segoe UI,Tahoma" font-size="23" font-weight="650">Choose or drop your scientific document</text>
+  <text x="427" y="421" text-anchor="middle" fill="#8fa6bf" font-family="Segoe UI,Tahoma" font-size="17">DOCX · DOCM · TEX</text>
+  <rect x="300" y="465" width="255" height="52" rx="10" fill="#2563eb"/><text x="427" y="498" text-anchor="middle" fill="#fff" font-family="Segoe UI,Tahoma" font-size="18" font-weight="650">Start repair</text>
+  <rect x="820" y="258" width="318" height="365" rx="18" fill="#122238" stroke="#28415e"/>
+  <text x="846" y="300" fill="#fff" font-family="Segoe UI,Tahoma" font-size="20" font-weight="650">Repair options</text>
+  <g fill="#dbe7f4" font-family="Segoe UI,Tahoma" font-size="17"><text x="850" y="350">☑ Readable change report</text><text x="850" y="393">☑ Create PDF</text><text x="850" y="436">☐ Export Word → LaTeX</text><text x="850" y="479">☐ Optional AI diagnostics</text><text x="850" y="522">☑ Persian thesis checks</text></g>
+  <rect x="846" y="553" width="266" height="48" rx="9" fill="#2563eb"/><text x="979" y="584" text-anchor="middle" fill="#fff" font-family="Segoe UI,Tahoma" font-size="17" font-weight="650">Scan &amp; review</text>
+  <text x="62" y="667" fill="#7890aa" font-family="Segoe UI,Tahoma" font-size="15">Original files are never overwritten.</text>
+</svg>

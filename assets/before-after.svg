@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="320" viewBox="0 0 1100 320">
+  <rect width="1100" height="320" rx="22" fill="#f4f7fb"/>
+  <rect x="35" y="35" width="485" height="250" rx="16" fill="#fff" stroke="#d4dee9"/><text x="65" y="78" fill="#64748b" font-family="Segoe UI" font-size="20">BEFORE</text><text x="65" y="155" fill="#9f1239" font-family="Consolas" font-size="34">x = frac12</text><text x="65" y="226" fill="#64748b" font-family="Segoe UI" font-size="17">Missing command slash and braces</text>
+  <path d="M535 160h30" stroke="#2563eb" stroke-width="5"/><path d="m560 148 16 12-16 12" fill="none" stroke="#2563eb" stroke-width="5"/>
+  <rect x="580" y="35" width="485" height="250" rx="16" fill="#fff" stroke="#b7dfd5"/><text x="610" y="78" fill="#0f766e" font-family="Segoe UI" font-size="20">AFTER</text><text x="610" y="155" fill="#166534" font-family="Consolas" font-size="34">x = \frac{1}{2}</text><text x="610" y="226" fill="#64748b" font-family="Segoe UI" font-size="17">Safe automatic repair · recorded in report</text>
+</svg>

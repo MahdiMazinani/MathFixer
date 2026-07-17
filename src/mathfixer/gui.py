@@ -5,8 +5,8 @@ import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QSettings, Qt, QThreadPool, Signal
-from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QFont, QIcon
+from PySide6.QtCore import QObject, QRunnable, QSettings, Qt, QThreadPool, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QDragEnterEvent, QDropEvent, QFont, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -33,15 +33,20 @@ from PySide6.QtWidgets import (
 
 from . import __version__
 from .docx_engine import convert_document, scan_document
+from .features.ai_assistant import AIAnalysisError, analyze_latex_with_openai
+from .features.latex_project import LatexFinding, LatexReport, analyze_latex, repair_latex
+from .features.word_to_latex import export_word_to_latex
 from .i18n import tr
-from .models import DetectionMode, FormulaCandidate
+from .models import DetectionMode, FormulaCandidate, FormulaKind
 from .pandoc_backend import PandocBackend, PandocNotFoundError
-
+from .plugins import THESIS_PROFILES
 
 DARK_STYLE = """
 QWidget { background: #0b1220; color: #dbe7f4; font-family: "Segoe UI", "Vazirmatn", "Tahoma"; font-size: 10pt; }
 QMainWindow { background: #07101d; }
 QFrame#card { background: #101c2d; border: 1px solid #21344b; border-radius: 14px; }
+QFrame#metric { background: #101c2d; border: 1px solid #21344b; border-radius: 12px; }
+QLabel#metricValue { color: #5eead4; font-size: 20pt; font-weight: 750; }
 QFrame#dropzone { background: #0d1a2a; border: 2px dashed #3b82f6; border-radius: 16px; }
 QFrame#dropzone[drag="true"] { background: #102b46; border-color: #5eead4; }
 QLabel#title { font-size: 23pt; font-weight: 700; color: #f8fbff; }
@@ -67,6 +72,8 @@ LIGHT_STYLE = """
 QWidget { background: #f4f7fb; color: #172033; font-family: "Segoe UI", "Vazirmatn", "Tahoma"; font-size: 10pt; }
 QMainWindow { background: #edf2f8; }
 QFrame#card { background: #ffffff; border: 1px solid #d6e0eb; border-radius: 14px; }
+QFrame#metric { background: #ffffff; border: 1px solid #d6e0eb; border-radius: 12px; }
+QLabel#metricValue { color: #1559c1; font-size: 20pt; font-weight: 750; }
 QFrame#dropzone { background: #f8fbff; border: 2px dashed #3b82f6; border-radius: 16px; }
 QFrame#dropzone[drag="true"] { background: #e6f3ff; border-color: #0f766e; }
 QLabel#title { font-size: 23pt; font-weight: 700; color: #10213a; }
@@ -98,6 +105,68 @@ class QueueItem:
     status_key: str = "state_ready"
     output: Path | None = None
     pdf_output: Path | None = None
+    html_report: Path | None = None
+    latex_output: Path | None = None
+    findings: list[LatexFinding] = field(default_factory=list)
+    error: str = ""
+
+
+@dataclass(slots=True)
+class UniversalScanResult:
+    report: object
+
+
+def scan_any_document(
+    path: Path,
+    *,
+    mode: DetectionMode,
+    ai_enabled: bool = False,
+    thesis_profile: str = "generic",
+    progress=None,
+) -> UniversalScanResult:
+    if path.suffix.lower() != ".tex":
+        return scan_document(path, mode=mode, progress=progress)
+    if progress:
+        progress(20, "Analyzing LaTeX source")
+    report = analyze_latex(path, thesis_profile=thesis_profile)
+    if ai_enabled:
+        try:
+            for item in analyze_latex_with_openai(path.read_text(encoding="utf-8", errors="replace")):
+                report.findings.append(
+                    LatexFinding(
+                        "AI_SUGGESTION", item.explanation or item.title, item.suggestion,
+                        line=item.line, severity=item.severity,
+                    )
+                )
+        except AIAnalysisError as exc:
+            report.findings.append(LatexFinding("AI_UNAVAILABLE", str(exc), severity="warning"))
+    report.detected = len(report.changes) + len(report.findings)
+    if progress:
+        progress(100, "LaTeX analysis completed")
+    return UniversalScanResult(report)
+
+
+def convert_latex_task(path: Path, output: Path, *, progress=None, **options):
+    if progress:
+        progress(15, "Repairing LaTeX source")
+    result = repair_latex(path, output, **options)
+    if progress:
+        progress(100, "LaTeX repair completed")
+    return result
+
+
+def convert_word_task(
+    path: Path,
+    output: Path,
+    *,
+    latex_output_path: Path | None = None,
+    progress=None,
+    **options,
+):
+    report = convert_document(path, output, progress=progress, **options)
+    if latex_output_path is not None:
+        export_word_to_latex(output, latex_output_path)
+    return report, latex_output_path
 
 
 class WorkerSignals(QObject):
@@ -255,6 +324,41 @@ class PreviewDialog(QDialog):
         super().accept()
 
 
+class LatexPreviewDialog(QDialog):
+    def __init__(self, item: QueueItem, language: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr(language, "change_report"))
+        self.resize(980, 620)
+        layout = QVBoxLayout(self)
+        title = QLabel(tr(language, "latex_review_count", count=len(item.candidates) + len(item.findings)))
+        title.setObjectName("section")
+        layout.addWidget(title)
+        table = QTableWidget(len(item.candidates) + len(item.findings), 4)
+        table.setHorizontalHeaderLabels(
+            [tr(language, "before"), tr(language, "after"), tr(language, "reason"), tr(language, "location")]
+        )
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        row = 0
+        for candidate in item.candidates:
+            values = [candidate.source, candidate.normalized, "; ".join(candidate.repairs), str(candidate.paragraph_index + 1)]
+            for column, value in enumerate(values):
+                table.setItem(row, column, QTableWidgetItem(value))
+            row += 1
+        for finding in item.findings:
+            values = [finding.message, finding.suggestion, finding.code, str(finding.line or "-")]
+            for column, value in enumerate(values):
+                table.setItem(row, column, QTableWidgetItem(value))
+            row += 1
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setAlternatingRowColors(True)
+        layout.addWidget(table)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        buttons.accepted.connect(self.accept)
+        layout.addWidget(buttons)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -268,8 +372,8 @@ class MainWindow(QMainWindow):
         self.items: list[QueueItem] = []
         self.pool = QThreadPool.globalInstance()
         self._busy = False
-        self.resize(1280, 820)
-        self.setMinimumSize(1020, 680)
+        self.resize(1280, 840)
+        self.setMinimumSize(900, 650)
         self._apply_theme()
         self._build_ui()
 
@@ -288,6 +392,9 @@ class MainWindow(QMainWindow):
             self.settings.setValue("reports", self.reports.isChecked())
             self.settings.setValue("atomic", self.atomic.isChecked())
             self.settings.setValue("pdf", self.pdf_checkbox.isChecked())
+            self.settings.setValue("ai", self.ai_checkbox.isChecked())
+            self.settings.setValue("export_latex", self.export_latex_checkbox.isChecked())
+            self.settings.setValue("thesis_profile", self.thesis_profile.currentData())
             self.settings.setValue("overwrite", self.overwrite_checkbox.isChecked())
             self.settings.setValue("output_dir", self.output_dir.text())
 
@@ -332,6 +439,23 @@ class MainWindow(QMainWindow):
         header.addWidget(self.backend_badge)
         root.addLayout(header)
 
+        metrics = QHBoxLayout()
+        self.metric_values: dict[str, QLabel] = {}
+        for key, label_key in (("found", "metric_found"), ("fixed", "metric_fixed"), ("warnings", "metric_warnings"), ("outputs", "metric_outputs")):
+            card = QFrame()
+            card.setObjectName("metric")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(14, 10, 14, 10)
+            value = QLabel("0")
+            value.setObjectName("metricValue")
+            label = QLabel(self.t(label_key))
+            label.setObjectName("subtitle")
+            card_layout.addWidget(value)
+            card_layout.addWidget(label)
+            metrics.addWidget(card)
+            self.metric_values[key] = value
+        root.addLayout(metrics)
+
         splitter = QSplitter()
         splitter.setChildrenCollapsible(False)
         left = QWidget()
@@ -347,6 +471,8 @@ class MainWindow(QMainWindow):
             ("add_files", self.choose_files),
             ("add_folder", self.choose_folder),
             ("review_selected", self.preview_selected),
+            ("change_report", self.open_selected_report),
+            ("open_output", self.open_selected_output),
             ("remove_selected", self.remove_selected),
         ):
             button = QPushButton(self.t(label))
@@ -370,7 +496,7 @@ class MainWindow(QMainWindow):
 
         side = QFrame()
         side.setObjectName("card")
-        side.setFixedWidth(330)
+        side.setFixedWidth(350)
         side_layout = QVBoxLayout(side)
         side_layout.setContentsMargins(20, 20, 20, 20)
         side_layout.setSpacing(11)
@@ -400,16 +526,30 @@ class MainWindow(QMainWindow):
         self.atomic.setChecked(self.settings.value("atomic", True, type=bool))
         self.pdf_checkbox = QCheckBox(self.t("export_pdf"))
         self.pdf_checkbox.setChecked(self.settings.value("pdf", False, type=bool))
+        self.export_latex_checkbox = QCheckBox(self.t("export_latex"))
+        self.export_latex_checkbox.setChecked(self.settings.value("export_latex", False, type=bool))
+        self.ai_checkbox = QCheckBox(self.t("ai_analysis"))
+        self.ai_checkbox.setChecked(self.settings.value("ai", False, type=bool))
         self.overwrite_checkbox = QCheckBox(self.t("replace_outputs"))
         self.overwrite_checkbox.setChecked(self.settings.value("overwrite", False, type=bool))
         side_layout.addWidget(self.reports)
         side_layout.addWidget(self.atomic)
         side_layout.addWidget(self.pdf_checkbox)
+        side_layout.addWidget(self.export_latex_checkbox)
+        side_layout.addWidget(self.ai_checkbox)
         pdf_note = QLabel(self.t("pdf_note"))
         pdf_note.setWordWrap(True)
         pdf_note.setObjectName("subtitle")
         side_layout.addWidget(pdf_note)
         side_layout.addWidget(self.overwrite_checkbox)
+
+        side_layout.addWidget(QLabel(self.t("thesis_profile")))
+        self.thesis_profile = QComboBox()
+        for profile in THESIS_PROFILES:
+            self.thesis_profile.addItem(profile.title_fa if self.language == "fa" else profile.title_en, profile.key)
+        saved_profile = str(self.settings.value("thesis_profile", "generic"))
+        self.thesis_profile.setCurrentIndex(max(0, self.thesis_profile.findData(saved_profile)))
+        side_layout.addWidget(self.thesis_profile)
 
         side_layout.addWidget(QLabel(self.t("output_folder")))
         self.output_dir = QLineEdit(str(self.settings.value("output_dir", "")))
@@ -421,7 +561,7 @@ class MainWindow(QMainWindow):
         side_layout.addStretch()
         self.scan_button = QPushButton(self.t("scan_review"))
         self.scan_button.clicked.connect(self.scan_all)
-        self.convert_button = QPushButton(self.t("convert_all"))
+        self.convert_button = QPushButton(self.t("start_repair"))
         self.convert_button.setObjectName("primary")
         self.convert_button.clicked.connect(self.convert_all)
         side_layout.addWidget(self.scan_button)
@@ -476,7 +616,7 @@ class MainWindow(QMainWindow):
 
     def choose_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
-            self, self.t("choose_documents"), "", "Word documents (*.docx *.docm)"
+            self, self.t("choose_documents"), "", "Scientific documents (*.docx *.docm *.tex)"
         )
         self.add_paths(paths)
 
@@ -484,7 +624,7 @@ class MainWindow(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, self.t("choose_input_folder"))
         if folder:
             self.add_paths(
-                [str(path) for path in Path(folder).iterdir() if path.suffix.lower() in {".docx", ".docm"}]
+                [str(path) for path in Path(folder).iterdir() if path.suffix.lower() in {".docx", ".docm", ".tex"}]
             )
 
     def choose_output_folder(self) -> None:
@@ -498,9 +638,9 @@ class MainWindow(QMainWindow):
             path = Path(raw).expanduser().resolve()
             if path.is_dir():
                 self.add_paths(
-                    [str(item) for item in path.iterdir() if item.suffix.lower() in {".docx", ".docm"}]
+                    [str(item) for item in path.iterdir() if item.suffix.lower() in {".docx", ".docm", ".tex"}]
                 )
-            elif path.suffix.lower() in {".docx", ".docm"} and path not in existing:
+            elif path.suffix.lower() in {".docx", ".docm", ".tex"} and path not in existing:
                 self.items.append(QueueItem(path=path))
                 existing.add(path)
         self.refresh_queue()
@@ -519,6 +659,8 @@ class MainWindow(QMainWindow):
                 outputs.append(item.output.name)
             if item.pdf_output:
                 outputs.append(item.pdf_output.name)
+            if item.latex_output:
+                outputs.append(item.latex_output.name)
             values = [
                 item.path.name,
                 str(selected) if item.candidates else "-",
@@ -530,22 +672,59 @@ class MainWindow(QMainWindow):
                 cell = QTableWidgetItem(value)
                 if column == 0:
                     cell.setToolTip(str(item.path))
+                if column == 3 and item.error:
+                    cell.setToolTip(item.error)
                 self.queue.setItem(row, column, cell)
         enabled = bool(self.items) and not self._busy
         self.scan_button.setEnabled(enabled)
         self.convert_button.setEnabled(enabled)
+        if hasattr(self, "metric_values"):
+            found = sum(len(item.candidates) + len(item.findings) for item in self.items)
+            fixed = sum(
+                len(item.candidates) for item in self.items if item.status_key == "state_completed"
+            )
+            warnings = sum(len(item.findings) for item in self.items)
+            outputs = sum(bool(item.output) + bool(item.pdf_output) + bool(item.latex_output) for item in self.items)
+            self.metric_values["found"].setText(str(found))
+            self.metric_values["fixed"].setText(str(fixed))
+            self.metric_values["warnings"].setText(str(warnings))
+            self.metric_values["outputs"].setText(str(outputs))
 
     def preview_selected(self) -> None:
         rows = sorted({index.row() for index in self.queue.selectedIndexes()})
         if not rows:
             return
         item = self.items[rows[0]]
-        if not item.candidates:
+        if not item.candidates and not item.findings:
             QMessageBox.information(self, self.t("scan_first"), self.t("scan_first_message"))
+            return
+        if item.path.suffix.lower() == ".tex":
+            LatexPreviewDialog(item, self.language, self).exec()
+            item.status_key = "state_reviewed"
+            self.refresh_queue()
             return
         if PreviewDialog(item, self.language, self).exec():
             item.status_key = "state_reviewed"
             self.refresh_queue()
+
+    def open_selected_report(self) -> None:
+        rows = sorted({index.row() for index in self.queue.selectedIndexes()})
+        if not rows:
+            return
+        report = self.items[rows[0]].html_report
+        if report and report.exists():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(report)))
+        else:
+            QMessageBox.information(self, self.t("change_report"), self.t("report_not_ready"))
+
+    def open_selected_output(self) -> None:
+        rows = sorted({index.row() for index in self.queue.selectedIndexes()})
+        if not rows:
+            return
+        item = self.items[rows[0]]
+        output = item.output or item.pdf_output or item.latex_output
+        if output and output.exists():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(output.parent)))
 
     @property
     def selected_mode(self) -> DetectionMode:
@@ -555,12 +734,12 @@ class MainWindow(QMainWindow):
         self._busy = busy
         self.refresh_queue()
 
-    def _start(self, function, on_done, *args, **kwargs) -> None:
+    def _start(self, function, on_done, *args, on_error=None, **kwargs) -> None:
         self._set_busy(True)
         worker = TaskWorker(function, *args, **kwargs)
         worker.signals.progress.connect(self._on_progress)
         worker.signals.completed.connect(on_done)
-        worker.signals.failed.connect(self._on_error)
+        worker.signals.failed.connect(on_error or self._on_error)
         self.pool.start(worker)
 
     def _on_progress(self, value: int, _technical_text: str) -> None:
@@ -580,7 +759,7 @@ class MainWindow(QMainWindow):
     def _scan_next(self, index: int) -> None:
         if index >= len(self.items):
             self._set_busy(False)
-            total = sum(len(item.candidates) for item in self.items)
+            total = sum(len(item.candidates) + len(item.findings) for item in self.items)
             repairs = sum(sum(bool(candidate.repairs) for candidate in item.candidates) for item in self.items)
             self.progress.setValue(100)
             self.status_label.setText(self.t("scan_complete", total=total, repairs=repairs))
@@ -590,17 +769,49 @@ class MainWindow(QMainWindow):
         item.status_key = "state_scanning"
         self.refresh_queue()
         self._start(
-            scan_document,
+            scan_any_document,
             lambda result, i=index: self._scan_completed(i, result),
             item.path,
+            on_error=lambda message, i=index: self._scan_failed(i, message),
             mode=self.selected_mode,
+            ai_enabled=self.ai_checkbox.isChecked(),
+            thesis_profile=str(self.thesis_profile.currentData()),
         )
 
     def _scan_completed(self, index: int, result) -> None:
         item = self.items[index]
-        item.candidates = result.report.candidates
+        report = result.report
+        if isinstance(report, LatexReport):
+            item.candidates = [
+                FormulaCandidate(
+                    part=item.path.name,
+                    paragraph_index=max(0, change.line - 1),
+                    start=0,
+                    end=len(change.before),
+                    source=change.before,
+                    normalized=change.after,
+                    kind=FormulaKind.LATEX_BROKEN,
+                    display=False,
+                    confidence=0.99,
+                    repairs=[change.reason],
+                    candidate_id=f"tex:{change.line}:{position}",
+                )
+                for position, change in enumerate(report.changes)
+            ]
+            item.findings = report.findings
+        else:
+            item.candidates = report.candidates
+            item.findings = []
         item.enabled_ids = {candidate.candidate_id for candidate in item.candidates}
         item.status_key = "state_scanned"
+        self._set_busy(False)
+        self.refresh_queue()
+        self._scan_next(index + 1)
+
+    def _scan_failed(self, index: int, message: str) -> None:
+        item = self.items[index]
+        item.status_key = "state_failed"
+        item.error = message
         self._set_busy(False)
         self.refresh_queue()
         self._scan_next(index + 1)
@@ -615,9 +826,13 @@ class MainWindow(QMainWindow):
             self._set_busy(False)
             self.progress.setValue(100)
             completed = sum(item.status_key == "state_completed" for item in self.items)
+            failed = sum(item.status_key == "state_failed" for item in self.items)
             self.status_label.setText(self.t("finished", count=completed))
             self.refresh_queue()
-            message = self.t("all_valid_pdf") if self.pdf_checkbox.isChecked() else self.t("all_valid")
+            if failed:
+                message = self.t("finished_with_errors", completed=completed, failed=failed)
+            else:
+                message = self.t("all_valid_pdf") if self.pdf_checkbox.isChecked() else self.t("all_valid")
             QMessageBox.information(self, "MathFixer", message)
             return
         item = self.items[index]
@@ -629,14 +844,37 @@ class MainWindow(QMainWindow):
         suffix = self.suffix.text().strip() or "_mathfixed"
         output = destination / f"{item.path.stem}{suffix}{item.path.suffix.lower()}"
         report_path = output.with_suffix(".report.json") if self.reports.isChecked() else None
+        html_report_path = output.with_suffix(".report.html") if self.reports.isChecked() else None
         pdf_path = output.with_suffix(".pdf") if self.pdf_checkbox.isChecked() else None
+        latex_path = (
+            output.with_suffix(".tex")
+            if self.export_latex_checkbox.isChecked() and item.path.suffix.lower() != ".tex"
+            else None
+        )
         item.status_key = "state_converting"
         self.refresh_queue()
+        if item.path.suffix.lower() == ".tex":
+            self._start(
+                convert_latex_task,
+                lambda result, i=index, path=output, html=html_report_path: self._convert_completed(i, path, result, html),
+                item.path,
+                output,
+                on_error=lambda message, i=index: self._convert_failed(i, message),
+                overwrite=self.overwrite_checkbox.isChecked(),
+                create_pdf=self.pdf_checkbox.isChecked(),
+                report_path=report_path,
+                html_report_path=html_report_path,
+                language=self.language,
+                thesis_profile=str(self.thesis_profile.currentData()),
+            )
+            return
         self._start(
-            convert_document,
-            lambda result, i=index, path=output: self._convert_completed(i, path, result),
+            convert_word_task,
+            lambda result, i=index, path=output, html=html_report_path: self._convert_completed(i, path, result, html),
             item.path,
             output,
+            on_error=lambda message, i=index: self._convert_failed(i, message),
+            latex_output_path=latex_path,
             mode=self.selected_mode,
             enabled_candidate_ids=item.enabled_ids,
             formula_overrides=item.overrides,
@@ -646,14 +884,32 @@ class MainWindow(QMainWindow):
             pdf_output_path=pdf_path,
             pdf_engine="auto",
             report_path=report_path,
+            html_report_path=html_report_path,
+            report_language=self.language,
         )
 
-    def _convert_completed(self, index: int, output: Path, report) -> None:
+    def _convert_completed(self, index: int, output: Path, result, html_report_path: Path | None) -> None:
         item = self.items[index]
-        item.candidates = report.candidates
+        latex_output = None
+        if isinstance(result, tuple):
+            report, latex_output = result
+        else:
+            report = result
+        if hasattr(report, "candidates"):
+            item.candidates = report.candidates
         item.status_key = "state_completed"
         item.output = output
         item.pdf_output = Path(report.pdf_path) if report.pdf_path else None
+        item.html_report = html_report_path if html_report_path and html_report_path.exists() else None
+        item.latex_output = latex_output if latex_output and latex_output.exists() else None
+        self._set_busy(False)
+        self.refresh_queue()
+        self._convert_next(index + 1)
+
+    def _convert_failed(self, index: int, message: str) -> None:
+        item = self.items[index]
+        item.status_key = "state_failed"
+        item.error = message
         self._set_busy(False)
         self.refresh_queue()
         self._convert_next(index + 1)
