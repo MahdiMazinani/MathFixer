@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import copy
-import json
 import os
 import re
 import tempfile
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable
-from zipfile import BadZipFile, ZipFile
+from zipfile import ZipFile
 
 from lxml import etree
 
+from .core.reporting import write_html_report, write_json_report
+from .core.security import UnsafePackageError, parse_xml, validate_ooxml_archive
 from .detector import detect_formulas
 from .models import (
     ConversionReport,
@@ -23,7 +24,6 @@ from .models import (
 from .pandoc_backend import M_NS, NS, W_NS, PandocBackend
 from .pdf_export import export_docx_to_pdf
 
-
 ProgressCallback = Callable[[int, str], None]
 WORD_STORY_PATTERN = re.compile(
     r"^word/(?:document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml$"
@@ -34,8 +34,8 @@ M = f"{{{M_NS}}}"
 ALLOWED_RUN_CHILDREN = {f"{W}rPr", f"{W}t"}
 
 
-class UnsafeDocumentError(RuntimeError):
-    pass
+class UnsafeDocumentError(UnsafePackageError):
+    """Backward-compatible name for unsafe OOXML package failures."""
 
 
 class ConversionAbortedError(RuntimeError):
@@ -56,23 +56,10 @@ def _progress(callback: ProgressCallback | None, value: int, message: str) -> No
 def _validate_input(path: Path) -> None:
     if path.suffix.lower() not in {".docx", ".docm"}:
         raise ValueError("Input must be a .docx or .docm file.")
-    if not path.is_file():
-        raise FileNotFoundError(path)
-    if path.stat().st_size > 1_000_000_000:
-        raise UnsafeDocumentError("The document exceeds the 1 GB safety limit.")
     try:
-        with ZipFile(path) as archive:
-            names = set(archive.namelist())
-            if "word/document.xml" not in names or "[Content_Types].xml" not in names:
-                raise UnsafeDocumentError("The file is not a valid Word OOXML package.")
-            total = sum(item.file_size for item in archive.infolist())
-            if total > 2_000_000_000:
-                raise UnsafeDocumentError("The expanded document exceeds the 2 GB safety limit.")
-            for item in archive.infolist():
-                if item.compress_size and item.file_size / item.compress_size > 2500:
-                    raise UnsafeDocumentError(f"Suspicious compression ratio in {item.filename}.")
-    except BadZipFile as exc:
-        raise UnsafeDocumentError("The document is damaged or encrypted.") from exc
+        validate_ooxml_archive(path)
+    except UnsafePackageError as exc:
+        raise UnsafeDocumentError(str(exc)) from exc
 
 
 def _story_names(archive: ZipFile) -> list[str]:
@@ -80,7 +67,14 @@ def _story_names(archive: ZipFile) -> list[str]:
 
 
 def _paragraph_text(paragraph: etree._Element) -> str:
-    return "".join(paragraph.xpath("./w:r//w:t/text()", namespaces=NS))
+    # Include common inline wrappers without accidentally absorbing nested text-box paragraphs.
+    return "".join(
+        paragraph.xpath(
+            "./w:r//w:t/text() | ./w:hyperlink/w:r//w:t/text() | "
+            "./w:smartTag/w:r//w:t/text() | ./w:ins/w:r//w:t/text() | ./w:del/w:r//w:t/text()",
+            namespaces=NS,
+        )
+    )
 
 
 def _count_native_math(root: etree._Element) -> int:
@@ -105,7 +99,7 @@ def scan_document(
             data = archive.read(name)
             story_parts[name] = data
             try:
-                root = etree.fromstring(data)
+                root = parse_xml(data)
             except etree.XMLSyntaxError as exc:
                 report.warnings.append(
                     ConversionWarning(code="STORY_XML_INVALID", message=str(exc), part=name)
@@ -163,7 +157,7 @@ def _replace_span(
     paragraph: etree._Element,
     candidate: FormulaCandidate,
     omath: etree._Element,
-) -> tuple[bool, str]:
+) -> tuple[bool, str, bool]:
     children = list(paragraph)
     cursor = 0
     ranges: list[tuple[int, int, int, etree._Element]] = []
@@ -176,13 +170,31 @@ def _replace_span(
     first = next((item for item in ranges if item[0] <= candidate.start < item[1]), None)
     last = next((item for item in ranges if item[0] < candidate.end <= item[1]), None)
     if first is None or last is None:
-        return False, "formula offsets no longer map to Word text runs"
+        return False, "formula offsets no longer map to Word text runs", False
 
     first_start, _, first_index, first_run = first
     last_start, _, last_index, last_run = last
     affected = children[first_index : last_index + 1]
     if not affected or any(not _run_is_safe(child) for child in affected):
-        return False, "formula crosses a field, hyperlink, bookmark, drawing, or complex Word run"
+        return False, "formula crosses a field, hyperlink, bookmark, drawing, or complex Word run", False
+
+    # A display equation that owns the complete paragraph is represented by the
+    # block-level m:oMathPara element expected by Word. Embedded display markers
+    # remain inline so surrounding prose and paragraph properties are preserved.
+    block_math = omath.tag == f"{M}oMathPara"
+    visible = _paragraph_text(paragraph)
+    if block_math and not visible[: candidate.start].strip() and not visible[candidate.end :].strip():
+        parent = paragraph.getparent()
+        if parent is not None and all(
+            child.tag == f"{W}pPr" or _run_is_safe(child) for child in list(paragraph)
+        ):
+            parent.replace(paragraph, copy.deepcopy(omath))
+            return True, "", True
+    if block_math:
+        inline = omath.find(f"{M}oMath")
+        if inline is None:
+            return False, "display equation does not contain an Office Math object", False
+        omath = inline
 
     first_text = _run_text(first_run)
     last_text = _run_text(last_run)
@@ -201,7 +213,7 @@ def _replace_span(
     suffix_run = _clone_run_with_text(last_run, suffix)
     if suffix_run is not None:
         paragraph.insert(insertion, suffix_run)
-    return True, ""
+    return True, "", False
 
 
 def _snapshot(path: Path, *, story_parts: Iterable[str] = ()) -> PackageSnapshot:
@@ -214,7 +226,7 @@ def _snapshot(path: Path, *, story_parts: Iterable[str] = ()) -> PackageSnapshot
         }
         for name in _story_names(archive):
             try:
-                root = etree.fromstring(archive.read(name))
+                root = parse_xml(archive.read(name))
             except etree.XMLSyntaxError:
                 continue
             snapshot.tables += len(root.xpath(".//w:tbl", namespaces=NS))
@@ -232,6 +244,7 @@ def _validate_output(
     input_path: Path,
     output_path: Path,
     modified_parts: set[str],
+    expected_new_math: int,
 ) -> dict[str, object]:
     before = _snapshot(input_path, story_parts=modified_parts)
     after = _snapshot(output_path, story_parts=modified_parts)
@@ -250,13 +263,18 @@ def _validate_output(
         after.unchanged_crc.get(name) == crc for name, crc in before.unchanged_crc.items()
     )
     package_ok = before.entries == after.entries
+    native_math_before = 0
+    with ZipFile(input_path) as archive:
+        for name in _story_names(archive):
+            native_math_before += _count_native_math(parse_xml(archive.read(name)))
     with ZipFile(output_path) as archive:
         bad_member = archive.testzip()
         native_math = 0
         for name in _story_names(archive):
-            root = etree.fromstring(archive.read(name))
+            root = parse_xml(archive.read(name))
             native_math += _count_native_math(root)
-    valid = package_ok and unchanged_parts and all(structures.values()) and bad_member is None
+    math_delta_ok = native_math - native_math_before == expected_new_math
+    valid = package_ok and unchanged_parts and all(structures.values()) and bad_member is None and math_delta_ok
     return {
         "valid": valid,
         "zip_integrity": bad_member is None,
@@ -264,6 +282,8 @@ def _validate_output(
         "unmodified_parts_byte_identical": unchanged_parts,
         "structures_preserved": structures,
         "native_math_objects": native_math,
+        "native_math_delta": native_math - native_math_before,
+        "native_math_delta_valid": math_delta_ok,
         "modified_parts": sorted(modified_parts),
     }
 
@@ -282,6 +302,8 @@ def convert_document(
     pdf_output_path: str | os.PathLike[str] | None = None,
     pdf_engine: str = "auto",
     report_path: str | os.PathLike[str] | None = None,
+    html_report_path: str | os.PathLike[str] | None = None,
+    report_language: str = "en",
     progress: ProgressCallback | None = None,
 ) -> ConversionReport:
     source = Path(input_path).expanduser().resolve()
@@ -327,7 +349,7 @@ def convert_document(
             by_part.setdefault(candidate.part, []).append(candidate)
 
     for part_number, (part, candidates) in enumerate(by_part.items()):
-        root = etree.fromstring(scan.story_parts[part])
+        root = parse_xml(scan.story_parts[part])
         paragraphs = root.xpath(".//w:p", namespaces=NS)
         grouped: dict[int, list[FormulaCandidate]] = {}
         for candidate in candidates:
@@ -338,7 +360,7 @@ def convert_document(
             expected_text = before_text
             for candidate in sorted(paragraph_candidates, key=lambda item: item.start, reverse=True):
                 expected_text = expected_text[: candidate.start] + expected_text[candidate.end :]
-                ok, reason = _replace_span(
+                ok, reason, block_replaced = _replace_span(
                     paragraph, candidate, converted[candidate.candidate_id]
                 )
                 if ok:
@@ -358,7 +380,12 @@ def convert_document(
                             formula=candidate.source,
                         )
                     )
-            if _paragraph_text(paragraph) != expected_text:
+            text_preserved = (
+                not expected_text.strip()
+                if block_replaced
+                else _paragraph_text(paragraph) == expected_text
+            )
+            if not text_preserved:
                 raise ConversionAbortedError(
                     f"Text-preservation check failed in {part}, paragraph {paragraph_index}."
                 )
@@ -375,11 +402,10 @@ def convert_document(
         raise ConversionAbortedError("No selected formula could be converted safely.")
 
     _progress(progress, 82, "Writing an atomic, layout-preserving copy")
-    temp_handle = tempfile.NamedTemporaryFile(
+    with tempfile.NamedTemporaryFile(
         prefix=f".{target.stem}-", suffix=target.suffix, dir=target.parent, delete=False
-    )
-    temp_path = Path(temp_handle.name)
-    temp_handle.close()
+    ) as temp_handle:
+        temp_path = Path(temp_handle.name)
     pdf_temp_path: Path | None = None
     pdf_target: Path | None = None
     pdf_result = None
@@ -388,7 +414,7 @@ def convert_document(
             for info in original.infolist():
                 data = modified.get(info.filename, original.read(info.filename))
                 output.writestr(info, data)
-        report.validation = _validate_output(source, temp_path, set(modified))
+        report.validation = _validate_output(source, temp_path, set(modified), report.converted)
         if not report.validation.get("valid"):
             raise ConversionAbortedError("Package-preservation validation failed; no output was published.")
         if create_pdf:
@@ -400,14 +426,13 @@ def convert_document(
             if pdf_target.exists() and not overwrite:
                 raise FileExistsError(pdf_target)
             pdf_target.parent.mkdir(parents=True, exist_ok=True)
-            pdf_handle = tempfile.NamedTemporaryFile(
+            with tempfile.NamedTemporaryFile(
                 prefix=f".{pdf_target.stem}-",
                 suffix=".pdf",
                 dir=pdf_target.parent,
                 delete=False,
-            )
-            pdf_temp_path = Path(pdf_handle.name)
-            pdf_handle.close()
+            ) as pdf_handle:
+                pdf_temp_path = Path(pdf_handle.name)
             pdf_result = export_docx_to_pdf(
                 temp_path,
                 pdf_temp_path,
@@ -430,9 +455,15 @@ def convert_document(
         report.pdf_size_bytes = pdf_result.size_bytes
 
     report.success = True
-    if report_path:
-        Path(report_path).write_text(
-            json.dumps(report.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
+    data = report.to_dict()
+    try:
+        if report_path:
+            write_json_report(Path(report_path), data)
+        if html_report_path:
+            write_html_report(Path(html_report_path), data, language=report_language)
+    except OSError as exc:
+        report.warnings.append(
+            ConversionWarning(code="REPORT_WRITE_FAILED", message=str(exc))
         )
     _progress(progress, 100, "Conversion and validation completed")
     return report

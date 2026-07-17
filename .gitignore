@@ -8,7 +8,14 @@ build/
 dist/
 *.spec
 *.report.json
+*.report.html
 *_mathfixed.docx
 *_mathfixed.docm
+*_mathfixed.tex
+*_mathfixed.pdf
+*.aux
+*.log
+*.toc
+*.synctex.gz
 .DS_Store
 Thumbs.db

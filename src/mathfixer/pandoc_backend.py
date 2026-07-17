@@ -14,7 +14,6 @@ from lxml import etree
 
 from .models import ConversionWarning, FormulaCandidate
 
-
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 NS = {"w": W_NS, "m": M_NS}
@@ -108,7 +107,12 @@ class PandocBackend:
                     )
                 continue
             for candidate in occurrences:
-                result[candidate.candidate_id] = copy.deepcopy(omath)
+                native = copy.deepcopy(omath)
+                if candidate.display:
+                    block = etree.Element(f"{{{M_NS}}}oMathPara", nsmap={"m": M_NS})
+                    block.append(native)
+                    native = block
+                result[candidate.candidate_id] = native
         return result, warnings
 
     def _convert_batch(

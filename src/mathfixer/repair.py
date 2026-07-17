@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 import unicodedata
 
-
 _SUPERSCRIPTS = str.maketrans(
     {
         "⁰": "0",

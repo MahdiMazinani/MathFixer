@@ -27,6 +27,7 @@ class DetectorTests(unittest.TestCase):
     def test_safe_mode_only_accepts_explicit_delimiters(self):
         self.assertEqual(self.detect("x = y + 1", DetectionMode.SAFE), [])
         self.assertEqual(len(self.detect("$x = y + 1$", DetectionMode.SAFE)), 1)
+        self.assertEqual(self.detect(r"$x = y + 1", DetectionMode.SAFE), [])
 
     def test_balanced_mode_detects_plain_equation(self):
         candidates = self.detect("x = y + 1")
@@ -39,6 +40,11 @@ class DetectorTests(unittest.TestCase):
         self.assertIn(r"\sigma ^{2}", candidates[0].normalized)
         self.assertIn(r"\sqrt{x}", candidates[0].normalized)
         self.assertIn(r"x_{i}", candidates[0].normalized)
+
+    def test_balanced_mode_detects_standalone_unicode_math(self):
+        candidates = self.detect("σ² + √x + ∑xᵢ")
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].kind, FormulaKind.UNICODE_MATH)
 
     def test_regular_persian_prose_is_not_math(self):
         text = "این پاراگراف درباره داده‌کاوی، میانگین و تحلیل آماری توضیح می‌دهد."

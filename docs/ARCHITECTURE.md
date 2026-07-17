@@ -1,34 +1,45 @@
 # Architecture
 
-MathFixer separates document safety from formula interpretation.
+MathFixer 1.2 separates stable document services from optional product features. Existing public imports remain compatible while the project migrates away from a single-purpose Word utility.
 
-```mermaid
-flowchart TD
-    A[Word OOXML package] --> B[Story-part scanner]
-    B --> C[Layered detector]
-    C --> D[Conservative repair]
-    D --> E[Pandoc fragment compiler]
-    E --> F[OMML run patcher]
-    F --> G[Package and structure audit]
-    G --> H[Atomic DOCX publish]
-    H --> I[Optional validated PDF]
+```text
+mathfixer/
+├── core/
+│   ├── security.py          hardened OOXML/XML input boundary
+│   └── reporting.py         atomic JSON and readable HTML reports
+├── features/
+│   ├── latex_project.py     TEX analysis, repair and XeLaTeX output
+│   ├── citations.py         local BibTeX key validation
+│   ├── persian.py           xepersian/font/bidi diagnostics
+│   ├── word_to_latex.py     explicit Pandoc export
+│   └── ai_assistant.py      opt-in provider boundary
+├── plugins/
+│   └── thesis.py            university compatibility profile registry
+├── detector.py              Word formula candidate detection
+├── repair.py                conservative deterministic normalization
+├── pandoc_backend.py        isolated math-fragment compiler
+├── docx_engine.py           OOXML scan, patch and preservation audit
+├── pdf_export.py            macro-safe Word/LibreOffice PDF boundary
+├── gui.py                   desktop orchestration and presentation
+└── cli.py                   automation interface
 ```
-
-## Modules
-
-- `detector.py` finds explicit TeX, damaged delimiter sequences, raw environments, UnicodeMath, and strict plain equations. It does not mutate XML.
-- `repair.py` normalizes individual candidates and records every nontrivial repair.
-- `pandoc_backend.py` batches unique formulas through Pandoc and extracts only `m:oMath` fragments from Pandoc's temporary DOCX.
-- `docx_engine.py` maps formula offsets across split Word runs, inserts OMML, copies all package members, and enforces preservation invariants.
-- `gui.py` provides asynchronous batch processing, drag/drop, review, opt-out, and manual normalization edits.
-- `i18n.py` contains parity-tested Persian and English interface catalogs.
-- `pdf_export.py` exports the validated DOCX through Microsoft Word COM or LibreOffice and validates the resulting PDF.
-- `cli.py` exposes deterministic scan, conversion, audit, and dependency checks.
 
 ## Trust boundaries
 
-Input packages are checked for type, required OOXML entries, expanded size, and suspicious compression ratios. Macros are copied but never loaded or executed. External conversion receives formula strings only. Output is written to a temporary file in the destination directory and atomically renamed only after validation.
+1. Input files are untrusted. ZIP limits and a no-DTD/no-entity/no-network XML parser run before document processing.
+2. Deterministic repair is the default. Ambiguous changes become findings for human review.
+3. Pandoc receives isolated formula strings for Word repair; it never rebuilds the source Word document.
+4. DOCM PDF export uses Word only and sets `AutomationSecurityForceDisable` before opening the file.
+5. AI is optional, advisory and explicit. The desktop application does not persist credentials.
+6. Output documents are published through atomic replacement only after package validation. Reports are written atomically and reporting failure is recorded without corrupting a valid document.
 
-## Deliberate refusal cases
+## Plugin direction
 
-MathFixer skips a candidate if it crosses a complex Word structure such as a field, drawing, hyperlink wrapper, or bookmark boundary. Flattening such a structure could change semantics or layout. The skip is explicit in the report and the surrounding document remains untouched.
+`plugins/thesis.py` is the first registry boundary. Future plugins should expose diagnostics and proposed changes through the same report model and must never write the source file directly. University-specific support requires a user-provided or appropriately licensed template plus regression fixtures; a profile name alone must not imply official endorsement.
+
+## Output contracts
+
+- Word repair: output package entry set is preserved, unmodified parts remain byte-identical and the native-math delta must equal successful conversions.
+- LaTeX repair: only narrowly defined deterministic replacements are applied to a different output path.
+- Reports: every applied repair includes before, after, reason and location.
+- PDF: output must have a PDF header, EOF marker and a valid page count when `pypdf` is available.
