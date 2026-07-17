@@ -68,6 +68,7 @@ jobs:
           TAG="$GITHUB_REF_NAME"
           TAG="${TAG#release-}"
           gh release create "$TAG" MathFixer-Windows-Portable.zip SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "MathFixer $TAG" \
             --generate-notes
