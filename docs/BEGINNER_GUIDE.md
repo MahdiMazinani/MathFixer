@@ -14,4 +14,6 @@ AI diagnostics are optional and explicitly off by default. Selecting a provider 
 
 If atomic conversion fails, wait while MathFixer automatically prepares review data. Then choose **Review selected**, disable or correct the unwanted candidate, and run the single action again. Optional PDF engines each have a 45-second GUI limit; PDF failure keeps the validated Word output and marks it with a warning.
 
+The document row shows the current Word stage. **Converting formulas with Pandoc** normally completes in seconds and has a 45-second total limit in version 2.0.3. If an older version remains there for minutes, close it, install the latest Release, and retry; the source file is never modified. A document with no detected formulas skips Pandoc.
+
 For DOCM files, PDF export requires desktop Microsoft Word so VBA can be force-disabled. For TEX-to-PDF, XeLaTeX must be installed separately.

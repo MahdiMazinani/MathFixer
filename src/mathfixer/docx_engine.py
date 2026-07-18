@@ -296,6 +296,8 @@ def convert_document(
     enabled_candidate_ids: set[str] | None = None,
     formula_overrides: dict[str, str] | None = None,
     pandoc_path: str | None = None,
+    pandoc_timeout: float = 30,
+    pandoc_total_timeout: float = 45,
     overwrite: bool = False,
     fail_on_formula_error: bool = True,
     create_pdf: bool = False,
@@ -331,11 +333,25 @@ def convert_document(
                     candidate.repairs.append("edited in preview")
     selected = [item for item in report.candidates if item.enabled]
     report.skipped = report.detected - len(selected)
-    _progress(progress, 43, f"Converting {len(selected)} formula(s) to Office Math")
+    converted: dict[str, etree._Element] = {}
+    warnings: list[ConversionWarning] = []
+    if selected:
+        _progress(progress, 43, f"Converting {len(selected)} formula(s) to Office Math")
+        backend = PandocBackend(
+            pandoc_path,
+            timeout=pandoc_timeout,
+            total_timeout=pandoc_total_timeout,
+        )
+        report.pandoc_version = backend.version
 
-    backend = PandocBackend(pandoc_path)
-    report.pandoc_version = backend.version
-    converted, warnings = backend.convert_many(selected)
+        def pandoc_progress(done: int, total: int, message: str) -> None:
+            value = 43 + int(19 * done / max(1, total))
+            _progress(progress, value, message)
+
+        converted, warnings = backend.convert_many(selected, progress=pandoc_progress)
+    else:
+        report.pandoc_version = "not required (no formulas selected)"
+        _progress(progress, 62, "No convertible formulas found; preserving the document")
     report.warnings.extend(warnings)
     missing = [item for item in selected if item.candidate_id not in converted]
     if missing and fail_on_formula_error:

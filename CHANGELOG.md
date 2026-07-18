@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.3 — 2026-07-18
+
+- Fixed the remaining Word conversion hang when AI, thesis mode, PDF and atomic mode are all off.
+- Replaced Pandoc pipe-based execution with file-backed output and deterministic child-tree cleanup.
+- Added a 30-second per-batch and 45-second whole-document Pandoc limit; a timed-out batch is never retried for every remaining formula group.
+- Retained Qt workers until all completion/error signals are delivered, preventing frozen Windows builds from losing a result callback.
+- Skipped Pandoc entirely for documents with no detected formulas.
+- Displayed the current localized processing stage directly in each queue row.
+- Added real DOCX conversion through the Windows GUI worker and a post-build frozen-EXE/embedded-Pandoc smoke test.
+
 ## 2.0.2 — 2026-07-18
 
 - Fixed the apparent conversion hang caused by optional PDF engines waiting up to six minutes.

@@ -30,6 +30,22 @@ jobs:
       - name: Build self-contained executable
         shell: powershell
         run: .\scripts\build_windows.ps1 -Python python
+      - name: Smoke-test the frozen EXE and embedded Pandoc
+        shell: powershell
+        run: |
+          python tests\smoke_document.py smoke-input.docx
+          $inputPath = (Resolve-Path smoke-input.docx).Path
+          $outputPath = Join-Path $PWD "smoke-output.docx"
+          $process = Start-Process -FilePath "dist\MathFixer.exe" -ArgumentList @("--self-test", $inputPath, $outputPath) -PassThru
+          if (-not $process.WaitForExit(45000)) {
+            Stop-Process -Id $process.Id -Force
+            throw "Frozen MathFixer.exe exceeded the 45-second conversion smoke limit."
+          }
+          if ($process.ExitCode -ne 0 -or -not (Test-Path $outputPath)) {
+            $errorPath = [IO.Path]::ChangeExtension($outputPath, ".error.txt")
+            if (Test-Path $errorPath) { Get-Content $errorPath }
+            throw "Frozen MathFixer.exe could not convert a real DOCX with embedded Pandoc."
+          }
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
       - name: Build installer and sign when a certificate is configured

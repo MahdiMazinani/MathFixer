@@ -1,10 +1,65 @@
+import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
-from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QEventLoop, QSettings, QTimer
+from PySide6.QtWidgets import QApplication, QMessageBox
+from smoke_document import write_smoke_document
 
 from mathfixer.gui import MainWindow, QueueItem, scan_any_document
 from mathfixer.models import ConversionReport, ConversionWarning
+
+
+def run_real_conversion(app: QApplication) -> None:
+    """Exercise QThreadPool, signal delivery, Pandoc and DOCX publication together."""
+    with tempfile.TemporaryDirectory() as directory:
+        source = Path(directory, "small-formulas.docx")
+        write_smoke_document(source)
+        window = MainWindow()
+        window.reports.setChecked(False)
+        window.atomic.setChecked(False)
+        window.pdf_checkbox.setChecked(False)
+        window.export_latex_checkbox.setChecked(False)
+        window.ai_provider.setCurrentIndex(window.ai_provider.findData("off"))
+        window.thesis_profile.setCurrentIndex(window.thesis_profile.findData("generic"))
+        window.add_paths([str(source)])
+
+        loop = QEventLoop()
+        poll = QTimer()
+        poll.setInterval(25)
+        poll.timeout.connect(lambda: loop.quit() if not window._busy else None)
+        watchdog = QTimer()
+        watchdog.setSingleShot(True)
+        timed_out: list[bool] = []
+
+        def stop_on_timeout() -> None:
+            timed_out.append(True)
+            loop.quit()
+
+        watchdog.timeout.connect(stop_on_timeout)
+        with (
+            patch.object(QMessageBox, "information", return_value=QMessageBox.StandardButton.Ok),
+            patch.object(QMessageBox, "critical", return_value=QMessageBox.StandardButton.Ok),
+        ):
+            window.process_all()
+            self_retained = bool(window._workers)
+            poll.start()
+            watchdog.start(30_000)
+            loop.exec()
+        poll.stop()
+        watchdog.stop()
+        window.pool.waitForDone(5_000)
+        app.processEvents()
+
+        assert self_retained, "TaskWorker was not retained after scheduling"
+        assert not timed_out, window.items[0].progress_detail or "GUI conversion timed out"
+        assert not window._busy
+        assert window.items[0].status_key in {"state_completed", "state_completed_warning"}
+        assert window.items[0].output is not None
+        assert window.items[0].output.exists()
+        assert window.items[0].progress_value == 100
+        assert not window._workers, "finished TaskWorker was not released"
+        window.close()
 
 
 def main() -> None:
@@ -15,6 +70,8 @@ def main() -> None:
     assert window.ai_provider.currentData() == "off"
     assert window.thesis_profile.currentData() == "generic"
     assert not hasattr(window, "scan_button")
+
+    run_real_conversion(app)
 
     calls: list[tuple[str, int]] = []
     window.items = [QueueItem(Path("sample.docx"))]
