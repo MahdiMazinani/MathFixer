@@ -12,4 +12,6 @@
 
 AI diagnostics are optional and explicitly off by default. Selecting a provider sends TEX text to that provider and can wait up to 90 seconds; do not enable AI for confidential work unless permitted.
 
+If atomic conversion fails, wait while MathFixer automatically prepares review data. Then choose **Review selected**, disable or correct the unwanted candidate, and run the single action again. Optional PDF engines each have a 45-second GUI limit; PDF failure keeps the validated Word output and marks it with a warning.
+
 For DOCM files, PDF export requires desktop Microsoft Word so VBA can be force-disabled. For TEX-to-PDF, XeLaTeX must be installed separately.

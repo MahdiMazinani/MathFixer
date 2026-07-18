@@ -1,11 +1,20 @@
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from mathfixer.pdf_export import PdfExportError, _validate_pdf, export_docx_to_pdf
+from mathfixer.pdf_export import PdfExportError, _run_bounded, _validate_pdf, export_docx_to_pdf
 
 
 class PdfValidationTests(unittest.TestCase):
+    def test_bounded_process_is_stopped_at_timeout(self):
+        with self.assertRaisesRegex(PdfExportError, "exceeded the 1-second"):
+            _run_bounded(
+                [sys.executable, "-c", "import time; time.sleep(5)"],
+                timeout=1,
+                engine_name="Test engine",
+            )
+
     def test_rejects_non_pdf_output(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory, "broken.pdf")

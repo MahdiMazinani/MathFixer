@@ -41,8 +41,8 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e ".[gui]"
-      - name: Import and construct GUI
+      - name: Construct GUI and verify recovery workflow
         shell: powershell
         run: |
           $env:QT_QPA_PLATFORM = "offscreen"
-          python -c "from PySide6.QtWidgets import QApplication; from mathfixer.gui import MainWindow; app=QApplication([]); window=MainWindow(); print(window.windowTitle())"
+          python tests/gui_smoke.py

@@ -90,6 +90,27 @@ class PreservationTests(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertFalse(output.with_suffix(".pdf").exists())
 
+    def test_nonfatal_pdf_failure_keeps_validated_docx_and_warning(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory, "source.docx")
+            output = Path(directory, "output.docx")
+            self.write_source(source)
+            with patch(
+                "mathfixer.docx_engine.export_docx_to_pdf",
+                side_effect=RuntimeError("PDF engine timed out"),
+            ):
+                report = convert_document(
+                    source,
+                    output,
+                    mode=DetectionMode.BALANCED,
+                    create_pdf=True,
+                    fail_on_pdf_error=False,
+                )
+            self.assertTrue(output.exists())
+            self.assertFalse(output.with_suffix(".pdf").exists())
+            self.assertTrue(report.success)
+            self.assertEqual(report.warnings[-1].code, "PDF_EXPORT_FAILED")
+
 
 if __name__ == "__main__":
     unittest.main()
