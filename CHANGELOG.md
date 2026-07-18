@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.5 — 2026-07-18
+
+- Fixed false text-preservation failures in real Word paragraphs containing hyperlinks, smart tags or tracked-change wrappers before a formula.
+- Unified scan and replacement offsets so visible wrapper text consumes the same character positions in both stages.
+- Kept formulas inside complex wrappers protected: MathFixer still skips or safely stops instead of editing unsafe Word structures.
+- Added a regression DOCX with a hyperlink before a complex formula and verified that link/prose text remains byte-for-byte equivalent at the text level.
+- Added a localized, readable explanation for genuine text-preservation safety stops.
+
 ## 2.0.4 — 2026-07-18
 
 - Fixed every retry being reported as failed when the intended output filename already existed.

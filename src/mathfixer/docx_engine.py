@@ -32,6 +32,12 @@ XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
 W = f"{{{W_NS}}}"
 M = f"{{{M_NS}}}"
 ALLOWED_RUN_CHILDREN = {f"{W}rPr", f"{W}t"}
+INLINE_TEXT_WRAPPERS = {
+    f"{W}hyperlink",
+    f"{W}smartTag",
+    f"{W}ins",
+    f"{W}del",
+}
 
 
 class UnsafeDocumentError(UnsafePackageError):
@@ -66,15 +72,19 @@ def _story_names(archive: ZipFile) -> list[str]:
     return sorted(name for name in archive.namelist() if WORD_STORY_PATTERN.match(name))
 
 
+def _paragraph_child_text(child: etree._Element) -> str:
+    """Return the text that contributes offsets for one direct paragraph child."""
+    if child.tag == f"{W}r":
+        return "".join(child.xpath(".//w:t/text()", namespaces=NS))
+    if child.tag in INLINE_TEXT_WRAPPERS:
+        return "".join(child.xpath("./w:r//w:t/text()", namespaces=NS))
+    return ""
+
+
 def _paragraph_text(paragraph: etree._Element) -> str:
-    # Include common inline wrappers without accidentally absorbing nested text-box paragraphs.
-    return "".join(
-        paragraph.xpath(
-            "./w:r//w:t/text() | ./w:hyperlink/w:r//w:t/text() | "
-            "./w:smartTag/w:r//w:t/text() | ./w:ins/w:r//w:t/text() | ./w:del/w:r//w:t/text()",
-            namespaces=NS,
-        )
-    )
+    # Keep this stream identical to the offsets used by _replace_span. Wrapper text
+    # is visible and must consume offset space even though MathFixer will not edit it.
+    return "".join(_paragraph_child_text(child) for child in paragraph)
 
 
 def _count_native_math(root: etree._Element) -> int:
@@ -162,10 +172,11 @@ def _replace_span(
     cursor = 0
     ranges: list[tuple[int, int, int, etree._Element]] = []
     for index, child in enumerate(children):
-        text = _run_text(child) if child.tag == f"{W}r" else ""
-        if text:
-            ranges.append((cursor, cursor + len(text), index, child))
-            cursor += len(text)
+        text = _paragraph_child_text(child)
+        start = cursor
+        cursor += len(text)
+        if text and child.tag == f"{W}r":
+            ranges.append((start, cursor, index, child))
 
     first = next((item for item in ranges if item[0] <= candidate.start < item[1]), None)
     last = next((item for item in ranges if item[0] < candidate.end <= item[1]), None)
