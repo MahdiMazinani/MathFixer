@@ -895,6 +895,7 @@ class MainWindow(QMainWindow):
             (("permissionerror", "permission denied", "access is denied"), "error_permission"),
             (("pandoc_timeout", "pandoc exceeded", "pandoc reached"), "error_pandoc_timeout"),
             (("no selected formula", "no selected formula could"), "error_no_safe_formula"),
+            (("text-preservation check failed",), "error_text_preservation"),
             (("unsafe document", "not a valid word", "badzipfile"), "error_invalid_document"),
         )
         for fragments, key in reasons:

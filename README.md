@@ -341,6 +341,7 @@ Ambiguous candidates require human review.
 | Missing citation is incorrect | Declare the correct `.bib` with `\bibliography` or `\addbibresource` |
 | SmartScreen warning | Verify SHA-256; public trust requires an Authenticode certificate |
 | Output already exists or every retry says Failed | Install 2.0.4 or later. With replacement off, MathFixer keeps the old result and automatically creates a numbered sibling instead of failing |
+| `Text-preservation check failed` in a paragraph | Install 2.0.5 or later. Earlier builds could misalign a formula when a hyperlink, smart tag or tracked-change wrapper appeared before it. The original was protected and never changed |
 
 ## Command-line cookbook
 
@@ -464,6 +465,7 @@ For signing, pass a PFX path/password to `build_installer.ps1`. GitHub Actions r
 - **v1.3 scope:** multi-file evidence, exact log locations, template adapters, visual PDF regression, installer/signing integration.
 - **v2.0 scope:** stable plugin/API contract, bidirectional project conversion with media, private/local AI providers, and opt-in collaboration bundles.
 - **v2.0.3 reliability patch:** bounded Pandoc conversion, retained GUI workers, visible processing stages, and frozen-EXE conversion smoke coverage.
+- **v2.0.5 Word preservation patch:** consistent offsets around hyperlinks and tracked changes, with localized safety-stop explanations.
 - **v2.0.4 output patch:** collision-free numbered output names and visible localized failure reasons.
 
 See [CHANGELOG.md](CHANGELOG.md) and [ROADMAP.md](docs/ROADMAP.md) for release details.

@@ -134,6 +134,37 @@ class PreservationTests(unittest.TestCase):
             self.assertEqual(report.pandoc_version, "not required (no formulas selected)")
             self.assertTrue(output.exists())
 
+    def test_inline_wrapper_before_formula_does_not_shift_replacement_offsets(self):
+        wrapped_document = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+ xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    <w:p>
+      <w:hyperlink r:id="rId9"><w:r><w:t>Link</w:t></w:r></w:hyperlink>
+      <w:r><w:t> before $x^2 + \\frac{1}{2}$ and ordinary trailing text.</w:t></w:r>
+    </w:p>
+    <w:sectPr/>
+  </w:body>
+</w:document>'''
+        plain_header = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p><w:r><w:t>Ordinary header.</w:t></w:r></w:p>
+</w:hdr>'''
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory, "wrapped.docx")
+            output = Path(directory, "wrapped_mathfixed.docx")
+            self.write_source(source, wrapped_document, plain_header)
+
+            report = convert_document(source, output, mode=DetectionMode.BALANCED)
+
+            self.assertTrue(report.success)
+            self.assertEqual(report.converted, 1)
+            with ZipFile(output) as archive:
+                root = etree.fromstring(archive.read("word/document.xml"))
+            text = "".join(root.xpath(".//w:t/text()", namespaces={"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}))
+            self.assertEqual(text, "Link before  and ordinary trailing text.")
+
 
 if __name__ == "__main__":
     unittest.main()
