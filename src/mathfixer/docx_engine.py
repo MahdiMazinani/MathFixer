@@ -388,12 +388,14 @@ def convert_document(
             paragraph = paragraphs[paragraph_index]
             before_text = _paragraph_text(paragraph)
             expected_text = before_text
+            paragraph_block_replaced = False
             for candidate in sorted(paragraph_candidates, key=lambda item: item.start, reverse=True):
-                expected_text = expected_text[: candidate.start] + expected_text[candidate.end :]
                 ok, reason, block_replaced = _replace_span(
                     paragraph, candidate, converted[candidate.candidate_id]
                 )
                 if ok:
+                    expected_text = expected_text[: candidate.start] + expected_text[candidate.end :]
+                    paragraph_block_replaced = paragraph_block_replaced or block_replaced
                     report.converted += 1
                 else:
                     if fail_on_formula_error:
@@ -412,7 +414,7 @@ def convert_document(
                     )
             text_preserved = (
                 not expected_text.strip()
-                if block_replaced
+                if paragraph_block_replaced
                 else _paragraph_text(paragraph) == expected_text
             )
             if not text_preserved:

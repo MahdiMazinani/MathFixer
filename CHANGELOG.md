@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.6 — 2026-07-18
+
+- Fixed non-atomic Word conversion incorrectly failing its final text-preservation check after safely skipping an uneditable formula.
+- The expected-text model now removes only formulas that were actually replaced; skipped formulas remain part of both the document and its validation baseline.
+- Added a mixed-paragraph regression test proving that an unsafe linked formula remains untouched while a safe formula in the same paragraph is converted and the output is published with a warning.
+
 ## 2.0.5 — 2026-07-18
 
 - Fixed false text-preservation failures in real Word paragraphs containing hyperlinks, smart tags or tracked-change wrappers before a formula.
