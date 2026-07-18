@@ -36,13 +36,15 @@ mathfixer/
 
 1. Input files are untrusted. ZIP limits and a no-DTD/no-entity/no-network XML parser run before document processing.
 2. Deterministic repair is the default. Ambiguous changes become findings for human review.
-3. Pandoc receives isolated formula strings for Word repair; it never rebuilds the source Word document.
+3. Pandoc receives isolated formula strings for Word repair; it never rebuilds the source Word document. Formula batches use file-backed child-process output, a 30-second batch limit and a 45-second whole-stage budget. Timeout cleanup stops the process tree and does not retry remaining batches; documents with no candidates skip Pandoc entirely.
 4. DOCM PDF export uses Word only and sets `AutomationSecurityForceDisable` before opening the file.
 5. AI is optional, advisory and explicit. The desktop application does not persist credentials.
 6. Output documents are published through atomic replacement only after package validation. Reports are written atomically and reporting failure is recorded without corrupting a valid document.
 7. LaTeX includes are resolved only inside a bounded project root; absolute/traversal paths are findings, not reads.
 8. Collaboration bundles exclude sources unless the caller provides explicit per-command consent.
 9. Remote AI/collaboration endpoints require HTTPS; local/private hosts may use HTTP for on-device services.
+
+The GUI retains every Qt worker until its final queued signal is delivered. Windows CI converts a real DOCX both through the GUI worker and through the frozen executable, covering the embedded-Pandoc boundary used by Releases.
 
 ## Plugin direction
 
