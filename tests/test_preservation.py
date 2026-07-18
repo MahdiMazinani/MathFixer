@@ -35,13 +35,13 @@ HEADER = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 @unittest.skipUnless(shutil.which("pandoc"), "Pandoc is required for the integration test")
 class PreservationTests(unittest.TestCase):
     @staticmethod
-    def write_source(source: Path) -> bytes:
+    def write_source(source: Path, document: bytes = DOCUMENT, header: bytes = HEADER) -> bytes:
         media = b"not-a-real-image-but-byte-preservation-matters"
         with ZipFile(source, "w", ZIP_DEFLATED) as archive:
             archive.writestr("[Content_Types].xml", CONTENT_TYPES)
             archive.writestr("_rels/.rels", RELS)
-            archive.writestr("word/document.xml", DOCUMENT)
-            archive.writestr("word/header1.xml", HEADER)
+            archive.writestr("word/document.xml", document)
+            archive.writestr("word/header1.xml", header)
             archive.writestr("word/media/image1.bin", media)
         return media
 
@@ -110,6 +110,29 @@ class PreservationTests(unittest.TestCase):
             self.assertFalse(output.with_suffix(".pdf").exists())
             self.assertTrue(report.success)
             self.assertEqual(report.warnings[-1].code, "PDF_EXPORT_FAILED")
+
+    def test_document_without_formulas_never_starts_pandoc(self):
+        plain_document = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p><w:r><w:t>Ordinary text without a formula.</w:t></w:r></w:p><w:sectPr/></w:body>
+</w:document>'''
+        plain_header = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p><w:r><w:t>Ordinary header.</w:t></w:r></w:p>
+</w:hdr>'''
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory, "plain.docx")
+            output = Path(directory, "plain_mathfixed.docx")
+            self.write_source(source, plain_document, plain_header)
+            with patch(
+                "mathfixer.docx_engine.PandocBackend",
+                side_effect=AssertionError("Pandoc must not run"),
+            ):
+                report = convert_document(source, output)
+            self.assertTrue(report.success)
+            self.assertEqual(report.detected, 0)
+            self.assertEqual(report.pandoc_version, "not required (no formulas selected)")
+            self.assertTrue(output.exists())
 
 
 if __name__ == "__main__":
