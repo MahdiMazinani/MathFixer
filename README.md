@@ -88,6 +88,8 @@ Select **Scan & repair files** once. Detection, repair, validation, and output c
 
 For Word files, the queue row now shows the active stage: opening, formula scan, Pandoc conversion, safe patching, writing, or validation. Pandoc has a 30-second batch limit and a 45-second limit for the complete formula-conversion stage. A timeout stops the process tree and fails safely instead of being repeated for every remaining batch. Documents with no detected formulas do not start Pandoc at all.
 
+When **Replace existing output files** is off, an existing result is never treated as a conversion failure. MathFixer keeps it untouched and automatically chooses the next available name, for example `article_mathfixed_2.docx`. Companion PDF, TEX and report filenames are reserved together so they cannot overwrite an earlier run.
+
 After completion, the dashboard shows problems, repairs, warnings, and output counts. Double-click a row or use **Review selected**.
 
 For Word formulas you can:
@@ -338,7 +340,7 @@ Ambiguous candidates require human review.
 | Include reported unsafe | Move the included TEX file inside the project root and use a relative path |
 | Missing citation is incorrect | Declare the correct `.bib` with `\bibliography` or `\addbibresource` |
 | SmartScreen warning | Verify SHA-256; public trust requires an Authenticode certificate |
-| Output already exists | Choose another suffix/folder or explicitly enable replacement |
+| Output already exists or every retry says Failed | Install 2.0.4 or later. With replacement off, MathFixer keeps the old result and automatically creates a numbered sibling instead of failing |
 
 ## Command-line cookbook
 
@@ -462,6 +464,7 @@ For signing, pass a PFX path/password to `build_installer.ps1`. GitHub Actions r
 - **v1.3 scope:** multi-file evidence, exact log locations, template adapters, visual PDF regression, installer/signing integration.
 - **v2.0 scope:** stable plugin/API contract, bidirectional project conversion with media, private/local AI providers, and opt-in collaboration bundles.
 - **v2.0.3 reliability patch:** bounded Pandoc conversion, retained GUI workers, visible processing stages, and frozen-EXE conversion smoke coverage.
+- **v2.0.4 output patch:** collision-free numbered output names and visible localized failure reasons.
 
 See [CHANGELOG.md](CHANGELOG.md) and [ROADMAP.md](docs/ROADMAP.md) for release details.
 
