@@ -165,6 +165,49 @@ class PreservationTests(unittest.TestCase):
             text = "".join(root.xpath(".//w:t/text()", namespaces={"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}))
             self.assertEqual(text, "Link before  and ordinary trailing text.")
 
+    def test_non_atomic_mode_preserves_a_formula_that_is_unsafe_to_replace(self):
+        mixed_document = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+ xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    <w:p>
+      <w:hyperlink r:id="rId9"><w:r><w:t>$a+b$</w:t></w:r></w:hyperlink>
+      <w:r><w:t> remains linked; convert $x^2 + \\frac{1}{2}$ safely.</w:t></w:r>
+    </w:p>
+    <w:sectPr/>
+  </w:body>
+</w:document>'''
+        plain_header = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p><w:r><w:t>Ordinary header.</w:t></w:r></w:p>
+</w:hdr>'''
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory, "mixed.docx")
+            output = Path(directory, "mixed_mathfixed.docx")
+            self.write_source(source, mixed_document, plain_header)
+
+            report = convert_document(
+                source,
+                output,
+                mode=DetectionMode.BALANCED,
+                fail_on_formula_error=False,
+            )
+
+            self.assertTrue(report.success)
+            self.assertEqual(report.converted, 1)
+            self.assertEqual(report.skipped, 1)
+            self.assertEqual(report.warnings[0].code, "UNSAFE_WORD_STRUCTURE")
+            with ZipFile(output) as archive:
+                root = etree.fromstring(archive.read("word/document.xml"))
+            namespaces = {
+                "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+                "m": "http://schemas.openxmlformats.org/officeDocument/2006/math",
+            }
+            text = "".join(root.xpath(".//w:t/text()", namespaces=namespaces))
+            self.assertEqual(text, "$a+b$ remains linked; convert  safely.")
+            self.assertEqual(len(root.xpath(".//m:oMath", namespaces=namespaces)), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
