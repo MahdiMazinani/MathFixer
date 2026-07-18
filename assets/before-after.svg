@@ -1,6 +1,55 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="320" viewBox="0 0 1100 320">
-  <rect width="1100" height="320" rx="22" fill="#f4f7fb"/>
-  <rect x="35" y="35" width="485" height="250" rx="16" fill="#fff" stroke="#d4dee9"/><text x="65" y="78" fill="#64748b" font-family="Segoe UI" font-size="20">BEFORE</text><text x="65" y="155" fill="#9f1239" font-family="Consolas" font-size="34">x = frac12</text><text x="65" y="226" fill="#64748b" font-family="Segoe UI" font-size="17">Missing command slash and braces</text>
-  <path d="M535 160h30" stroke="#2563eb" stroke-width="5"/><path d="m560 148 16 12-16 12" fill="none" stroke="#2563eb" stroke-width="5"/>
-  <rect x="580" y="35" width="485" height="250" rx="16" fill="#fff" stroke="#b7dfd5"/><text x="610" y="78" fill="#0f766e" font-family="Segoe UI" font-size="20">AFTER</text><text x="610" y="155" fill="#166534" font-family="Consolas" font-size="34">x = \frac{1}{2}</text><text x="610" y="226" fill="#64748b" font-family="Segoe UI" font-size="17">Safe automatic repair · recorded in report</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="760" viewBox="0 0 1400 760" role="img" aria-labelledby="title desc">
+  <title id="title">MathFixer converts complex raw formulas into native mathematical equations</title>
+  <desc id="desc">A scientific Word or LaTeX document with three complex raw formulas becomes a validated document with native math, preserved layout, and an audit report.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" x2="1"><stop stop-color="#07111f"/><stop offset="1" stop-color="#102a43"/></linearGradient>
+  </defs>
+  <rect width="1400" height="760" rx="30" fill="url(#background)"/>
+  <text x="56" y="62" fill="#f8fafc" font-family="Segoe UI,Tahoma" font-size="30" font-weight="700">What MathFixer actually does</text>
+  <text x="56" y="96" fill="#9fb4c9" font-family="Segoe UI,Tahoma" font-size="17">Repairs complex formula source, converts Word formulas to native Office Math, and proves every change.</text>
+
+  <g>
+    <rect x="55" y="130" width="610" height="520" rx="20" fill="#f8fafc"/>
+    <rect x="735" y="130" width="610" height="520" rx="20" fill="#f8fafc"/>
+  </g>
+
+  <rect x="55" y="130" width="610" height="58" rx="20" fill="#fff1f2"/>
+  <rect x="55" y="168" width="610" height="20" fill="#fff1f2"/>
+  <circle cx="86" cy="159" r="7" fill="#fb7185"/><text x="105" y="166" fill="#9f1239" font-family="Segoe UI,Tahoma" font-size="19" font-weight="700">BEFORE · raw / damaged formula source</text>
+  <text x="88" y="225" fill="#334155" font-family="Segoe UI,Tahoma" font-size="16">The model response is obtained from the integral</text>
+  <rect x="82" y="245" width="556" height="76" rx="10" fill="#fff7ed" stroke="#fdba74"/>
+  <text x="101" y="277" fill="#9a3412" font-family="Consolas,monospace" font-size="17">$$\int_0^\infty e^{-\alpha x^2}\cos(\beta x)dx</text>
+  <text x="101" y="304" fill="#9a3412" font-family="Consolas,monospace" font-size="17">= \frac{\sqrt{\pi}}{2\sqrt{\alpha}}e^{-\beta^2/(4\alpha)}$$</text>
+  <text x="88" y="360" fill="#334155" font-family="Segoe UI,Tahoma" font-size="16">The covariance and state transition are</text>
+  <rect x="82" y="380" width="556" height="90" rx="10" fill="#fff7ed" stroke="#fdba74"/>
+  <text x="101" y="412" fill="#9a3412" font-family="Consolas,monospace" font-size="16">\begin{bmatrix}\sigma_x^2 &amp; \rho\sigma_x\sigma_y\\</text>
+  <text x="101" y="438" fill="#9a3412" font-family="Consolas,monospace" font-size="16">\rho\sigma_x\sigma_y &amp; \sigma_y^2\end{bmatrix}</text>
+  <text x="88" y="509" fill="#334155" font-family="Segoe UI,Tahoma" font-size="16">Finally, the field satisfies</text>
+  <rect x="82" y="529" width="556" height="76" rx="10" fill="#fff7ed" stroke="#fdba74"/>
+  <text x="101" y="561" fill="#9a3412" font-family="Consolas,monospace" font-size="16">\frac{\partial u}{\partial t}=D\nabla^2u+</text>
+  <text x="101" y="587" fill="#9a3412" font-family="Consolas,monospace" font-size="16">\sum_{k=1}^{N} a_k\sin(k\pi x/L)</text>
+  <rect x="82" y="620" width="244" height="25" rx="12" fill="#ffe4e6"/><text x="99" y="638" fill="#be123c" font-family="Segoe UI,Tahoma" font-size="13">3 formula regions detected</text>
+
+  <path d="M680 382h38" stroke="#5eead4" stroke-width="6" stroke-linecap="round"/><path d="m707 366 20 16-20 16" fill="none" stroke="#5eead4" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <rect x="735" y="130" width="610" height="58" rx="20" fill="#ecfdf5"/>
+  <rect x="735" y="168" width="610" height="20" fill="#ecfdf5"/>
+  <circle cx="766" cy="159" r="7" fill="#10b981"/><text x="785" y="166" fill="#047857" font-family="Segoe UI,Tahoma" font-size="19" font-weight="700">AFTER · native math + validated document</text>
+  <text x="768" y="225" fill="#334155" font-family="Segoe UI,Tahoma" font-size="16">The model response is obtained from the integral</text>
+  <rect x="762" y="245" width="556" height="76" rx="10" fill="#f0fdfa" stroke="#5eead4"/>
+  <text x="1040" y="290" text-anchor="middle" fill="#0f172a" font-family="Cambria Math,STIX Two Math,serif" font-size="25">∫₀∞ e⁻ᵅˣ² cos(βx) dx = √π⁄(2√α) · e⁻ᵝ²⁄⁽⁴ᵅ⁾</text>
+  <text x="768" y="360" fill="#334155" font-family="Segoe UI,Tahoma" font-size="16">The covariance and state transition are</text>
+  <rect x="762" y="380" width="556" height="90" rx="10" fill="#f0fdfa" stroke="#5eead4"/>
+  <text x="1040" y="425" text-anchor="middle" fill="#0f172a" font-family="Cambria Math,STIX Two Math,serif" font-size="26">Σ = [ σₓ²    ρσₓσᵧ ; ρσₓσᵧ    σᵧ² ]</text>
+  <text x="768" y="509" fill="#334155" font-family="Segoe UI,Tahoma" font-size="16">Finally, the field satisfies</text>
+  <rect x="762" y="529" width="556" height="76" rx="10" fill="#f0fdfa" stroke="#5eead4"/>
+  <text x="1040" y="575" text-anchor="middle" fill="#0f172a" font-family="Cambria Math,STIX Two Math,serif" font-size="24">∂u⁄∂t = D∇²u + ∑ₖ₌₁ᴺ aₖ sin(kπx⁄L)</text>
+  <g font-family="Segoe UI,Tahoma" font-size="13">
+    <rect x="762" y="620" width="150" height="25" rx="12" fill="#d1fae5"/><text x="780" y="638" fill="#047857">✓ 3 native equations</text>
+    <rect x="920" y="620" width="171" height="25" rx="12" fill="#dbeafe"/><text x="938" y="638" fill="#1d4ed8">✓ layout preserved</text>
+    <rect x="1099" y="620" width="219" height="25" rx="12" fill="#ede9fe"/><text x="1117" y="638" fill="#6d28d9">✓ before/after report</text>
+  </g>
+
+  <rect x="55" y="684" width="1290" height="42" rx="12" fill="#132a42" stroke="#284764"/>
+  <text x="700" y="711" text-anchor="middle" fill="#cbd5e1" font-family="Segoe UI,Tahoma" font-size="15">Original prose, tables, images, styles and references stay in place · ambiguous changes wait for human review</text>
 </svg>

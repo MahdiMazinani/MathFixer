@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -33,8 +34,15 @@ from PySide6.QtWidgets import (
 
 from . import __version__
 from .docx_engine import convert_document, scan_document
-from .features.ai_assistant import AIAnalysisError, analyze_latex_with_openai
-from .features.latex_project import LatexFinding, LatexReport, analyze_latex, repair_latex
+from .features.ai_assistant import AIAnalysisError, analyze_latex_with_configured_provider
+from .features.latex_project import (
+    LatexFinding,
+    LatexReport,
+    analyze_latex,
+    repair_latex,
+    repair_latex_workspace,
+)
+from .features.pdf_compare import compare_pdfs
 from .features.word_to_latex import export_word_to_latex
 from .i18n import tr
 from .models import DetectionMode, FormulaCandidate, FormulaKind
@@ -121,6 +129,7 @@ def scan_any_document(
     *,
     mode: DetectionMode,
     ai_enabled: bool = False,
+    ai_provider: str = "openai",
     thesis_profile: str = "generic",
     progress=None,
 ) -> UniversalScanResult:
@@ -131,7 +140,10 @@ def scan_any_document(
     report = analyze_latex(path, thesis_profile=thesis_profile)
     if ai_enabled:
         try:
-            for item in analyze_latex_with_openai(path.read_text(encoding="utf-8", errors="replace")):
+            for item in analyze_latex_with_configured_provider(
+                path.read_text(encoding="utf-8", errors="replace"),
+                provider_name=ai_provider,
+            ):
                 report.findings.append(
                     LatexFinding(
                         "AI_SUGGESTION", item.explanation or item.title, item.suggestion,
@@ -152,6 +164,24 @@ def convert_latex_task(path: Path, output: Path, *, progress=None, **options):
     result = repair_latex(path, output, **options)
     if progress:
         progress(100, "LaTeX repair completed")
+    return result
+
+
+def convert_latex_project_task(path: Path, output_directory: Path, *, progress=None, **options):
+    if progress:
+        progress(10, "Copying and repairing the complete LaTeX project")
+    result = repair_latex_workspace(path, output_directory, **options)
+    if progress:
+        progress(100, "LaTeX project repair completed")
+    return result
+
+
+def compare_pdf_task(before: Path, after: Path, output_directory: Path, *, progress=None):
+    if progress:
+        progress(15, "Rendering PDF pages")
+    result = compare_pdfs(before, after, output_directory)
+    if progress:
+        progress(100, "Visual PDF comparison completed")
     return result
 
 
@@ -341,12 +371,15 @@ class LatexPreviewDialog(QDialog):
         table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         row = 0
         for candidate in item.candidates:
-            values = [candidate.source, candidate.normalized, "; ".join(candidate.repairs), str(candidate.paragraph_index + 1)]
+            values = [candidate.source, candidate.normalized, "; ".join(candidate.repairs), f"{candidate.part}:{candidate.paragraph_index + 1}"]
             for column, value in enumerate(values):
                 table.setItem(row, column, QTableWidgetItem(value))
             row += 1
         for finding in item.findings:
-            values = [finding.message, finding.suggestion, finding.code, str(finding.line or "-")]
+            location = finding.file or ""
+            if finding.line:
+                location = f"{location}:{finding.line}" if location else str(finding.line)
+            values = [finding.message, finding.suggestion, finding.code, location or "-"]
             for column, value in enumerate(values):
                 table.setItem(row, column, QTableWidgetItem(value))
             row += 1
@@ -393,7 +426,9 @@ class MainWindow(QMainWindow):
             self.settings.setValue("atomic", self.atomic.isChecked())
             self.settings.setValue("pdf", self.pdf_checkbox.isChecked())
             self.settings.setValue("ai", self.ai_checkbox.isChecked())
+            self.settings.setValue("ai_provider", self.ai_provider.currentData())
             self.settings.setValue("export_latex", self.export_latex_checkbox.isChecked())
+            self.settings.setValue("latex_project", self.latex_project_checkbox.isChecked())
             self.settings.setValue("thesis_profile", self.thesis_profile.currentData())
             self.settings.setValue("overwrite", self.overwrite_checkbox.isChecked())
             self.settings.setValue("output_dir", self.output_dir.text())
@@ -474,6 +509,7 @@ class MainWindow(QMainWindow):
             ("change_report", self.open_selected_report),
             ("open_output", self.open_selected_output),
             ("remove_selected", self.remove_selected),
+            ("compare_pdfs", self.compare_pdf_files),
         ):
             button = QPushButton(self.t(label))
             button.clicked.connect(handler)
@@ -496,7 +532,7 @@ class MainWindow(QMainWindow):
 
         side = QFrame()
         side.setObjectName("card")
-        side.setFixedWidth(350)
+        side.setMinimumWidth(330)
         side_layout = QVBoxLayout(side)
         side_layout.setContentsMargins(20, 20, 20, 20)
         side_layout.setSpacing(11)
@@ -530,6 +566,14 @@ class MainWindow(QMainWindow):
         self.export_latex_checkbox.setChecked(self.settings.value("export_latex", False, type=bool))
         self.ai_checkbox = QCheckBox(self.t("ai_analysis"))
         self.ai_checkbox.setChecked(self.settings.value("ai", False, type=bool))
+        self.ai_provider = QComboBox()
+        self.ai_provider.addItem("OpenAI", "openai")
+        self.ai_provider.addItem("OpenAI-compatible", "openai-compatible")
+        self.ai_provider.addItem("Ollama (local)", "ollama")
+        saved_ai_provider = str(self.settings.value("ai_provider", "openai"))
+        self.ai_provider.setCurrentIndex(max(0, self.ai_provider.findData(saved_ai_provider)))
+        self.latex_project_checkbox = QCheckBox(self.t("latex_project_mode"))
+        self.latex_project_checkbox.setChecked(self.settings.value("latex_project", True, type=bool))
         self.overwrite_checkbox = QCheckBox(self.t("replace_outputs"))
         self.overwrite_checkbox.setChecked(self.settings.value("overwrite", False, type=bool))
         side_layout.addWidget(self.reports)
@@ -537,6 +581,8 @@ class MainWindow(QMainWindow):
         side_layout.addWidget(self.pdf_checkbox)
         side_layout.addWidget(self.export_latex_checkbox)
         side_layout.addWidget(self.ai_checkbox)
+        side_layout.addWidget(self.ai_provider)
+        side_layout.addWidget(self.latex_project_checkbox)
         pdf_note = QLabel(self.t("pdf_note"))
         pdf_note.setWordWrap(True)
         pdf_note.setObjectName("subtitle")
@@ -568,7 +614,12 @@ class MainWindow(QMainWindow):
         side_layout.addWidget(self.convert_button)
 
         splitter.addWidget(left)
-        splitter.addWidget(side)
+        side_scroll = QScrollArea()
+        side_scroll.setWidgetResizable(True)
+        side_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        side_scroll.setMinimumWidth(370)
+        side_scroll.setWidget(side)
+        splitter.addWidget(side_scroll)
         splitter.setStretchFactor(0, 1)
         root.addWidget(splitter, 1)
 
@@ -631,6 +682,36 @@ class MainWindow(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, self.t("choose_output_folder"))
         if folder:
             self.output_dir.setText(folder)
+
+    def compare_pdf_files(self) -> None:
+        before, _ = QFileDialog.getOpenFileName(self, self.t("choose_pdf_before"), "", "PDF (*.pdf)")
+        if not before:
+            return
+        after, _ = QFileDialog.getOpenFileName(self, self.t("choose_pdf_after"), "", "PDF (*.pdf)")
+        if not after:
+            return
+        output = QFileDialog.getExistingDirectory(self, self.t("choose_compare_output"))
+        if not output:
+            return
+        self._start(
+            compare_pdf_task,
+            self._pdf_compare_completed,
+            Path(before),
+            Path(after),
+            Path(output),
+        )
+
+    def _pdf_compare_completed(self, report) -> None:
+        self._set_busy(False)
+        self.progress.setValue(100)
+        message = self.t(
+            "pdf_compare_result",
+            ratio=f"{report.changed_ratio:.3%}",
+            pages=len(report.pages),
+        )
+        self.status_label.setText(message)
+        QMessageBox.information(self, "MathFixer", message)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(report.pages[0].image_path).parent)))
 
     def add_paths(self, paths: list[str]) -> None:
         existing = {item.path for item in self.items}
@@ -775,6 +856,7 @@ class MainWindow(QMainWindow):
             on_error=lambda message, i=index: self._scan_failed(i, message),
             mode=self.selected_mode,
             ai_enabled=self.ai_checkbox.isChecked(),
+            ai_provider=str(self.ai_provider.currentData()),
             thesis_profile=str(self.thesis_profile.currentData()),
         )
 
@@ -784,7 +866,7 @@ class MainWindow(QMainWindow):
         if isinstance(report, LatexReport):
             item.candidates = [
                 FormulaCandidate(
-                    part=item.path.name,
+                    part=change.file or item.path.name,
                     paragraph_index=max(0, change.line - 1),
                     start=0,
                     end=len(change.before),
@@ -794,7 +876,7 @@ class MainWindow(QMainWindow):
                     display=False,
                     confidence=0.99,
                     repairs=[change.reason],
-                    candidate_id=f"tex:{change.line}:{position}",
+                    candidate_id=change.change_id,
                 )
                 for position, change in enumerate(report.changes)
             ]
@@ -854,6 +936,36 @@ class MainWindow(QMainWindow):
         item.status_key = "state_converting"
         self.refresh_queue()
         if item.path.suffix.lower() == ".tex":
+            if self.latex_project_checkbox.isChecked():
+                project_name = f"{item.path.parent.name}{suffix}"
+                project_parent = destination if self.output_dir.text().strip() else item.path.parent.parent
+                project_output = project_parent / project_name
+                project_report = (
+                    project_output.parent / f"{project_output.name}.report.json"
+                    if self.reports.isChecked()
+                    else None
+                )
+                project_html = (
+                    project_output.parent / f"{project_output.name}.report.html"
+                    if self.reports.isChecked()
+                    else None
+                )
+                self._start(
+                    convert_latex_project_task,
+                    lambda result, i=index, path=project_output / item.path.name, html=project_html: self._convert_completed(i, path, result, html),
+                    item.path,
+                    project_output,
+                    on_error=lambda message, i=index: self._convert_failed(i, message),
+                    overwrite=self.overwrite_checkbox.isChecked(),
+                    create_pdf=self.pdf_checkbox.isChecked(),
+                    report_path=project_report,
+                    html_report_path=project_html,
+                    language=self.language,
+                    thesis_profile=str(self.thesis_profile.currentData()),
+                    enabled_change_ids=item.enabled_ids,
+                    change_overrides=item.overrides,
+                )
+                return
             self._start(
                 convert_latex_task,
                 lambda result, i=index, path=output, html=html_report_path: self._convert_completed(i, path, result, html),
@@ -866,6 +978,8 @@ class MainWindow(QMainWindow):
                 html_report_path=html_report_path,
                 language=self.language,
                 thesis_profile=str(self.thesis_profile.currentData()),
+                enabled_change_ids=item.enabled_ids,
+                change_overrides=item.overrides,
             )
             return
         self._start(

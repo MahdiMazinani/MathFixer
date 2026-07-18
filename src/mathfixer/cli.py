@@ -7,10 +7,20 @@ from pathlib import Path
 
 from . import __version__
 from .docx_engine import convert_document, scan_document
-from .features.latex_project import analyze_latex, repair_latex
+from .features.ai_assistant import analyze_latex_with_configured_provider
+from .features.collaboration import create_review_bundle
+from .features.latex_project import (
+    LatexFinding,
+    analyze_latex,
+    repair_latex,
+    repair_latex_workspace,
+)
+from .features.pdf_compare import compare_pdfs
+from .features.project_conversion import latex_project_to_word, word_to_latex_project
 from .features.word_to_latex import export_word_to_latex
 from .models import DetectionMode
 from .pandoc_backend import PandocBackend, PandocNotFoundError
+from .plugins import PluginManager, load_template_adapter
 from .plugins.thesis import THESIS_PROFILES
 
 
@@ -41,6 +51,12 @@ def _build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--mode", type=_mode, default=DetectionMode.BALANCED)
     scan.add_argument("--json", dest="json_path", type=Path, help="write the full scan report")
     scan.add_argument("--thesis-profile", choices=[item.key for item in THESIS_PROFILES], default="generic")
+    scan.add_argument("--template-adapter", type=Path, help="apply a user-provided template adapter JSON")
+    scan.add_argument(
+        "--ai-provider",
+        choices=["openai", "openai-compatible", "ollama"],
+        help="explicitly opt in to an AI provider configured through environment variables",
+    )
 
     convert = subparsers.add_parser("convert", help="repair one or more DOCX, DOCM, or TEX documents")
     convert.add_argument("inputs", nargs="+", type=Path)
@@ -64,11 +80,50 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     convert.add_argument("--quiet", action="store_true")
     convert.add_argument("--thesis-profile", choices=[item.key for item in THESIS_PROFILES], default="generic")
+    convert.add_argument("--template-adapter", type=Path)
 
     word_to_latex = subparsers.add_parser("word-to-latex", help="export a Word document to standalone LaTeX")
     word_to_latex.add_argument("input", type=Path)
     word_to_latex.add_argument("output", type=Path)
     word_to_latex.add_argument("--pandoc", type=str)
+
+    project = subparsers.add_parser(
+        "project-convert", help="convert a Word/LaTeX project while preserving extracted media"
+    )
+    project.add_argument("input", type=Path)
+    project.add_argument("output", type=Path)
+    project.add_argument("--pandoc", type=str)
+    project.add_argument("--reference-docx", type=Path)
+    project.add_argument("--overwrite", action="store_true")
+
+    project_repair = subparsers.add_parser(
+        "project-repair", help="copy and repair every included TEX source in a project"
+    )
+    project_repair.add_argument("main_tex", type=Path)
+    project_repair.add_argument("output_dir", type=Path)
+    project_repair.add_argument("--overwrite", action="store_true")
+    project_repair.add_argument("--pdf", action="store_true")
+    project_repair.add_argument("--report", action="store_true")
+    project_repair.add_argument("--template-adapter", type=Path)
+    project_repair.add_argument(
+        "--thesis-profile", choices=[item.key for item in THESIS_PROFILES], default="generic"
+    )
+
+    compare = subparsers.add_parser("pdf-compare", help="render and compare two PDFs visually")
+    compare.add_argument("before", type=Path)
+    compare.add_argument("after", type=Path)
+    compare.add_argument("output_dir", type=Path)
+    compare.add_argument("--dpi", type=int, default=120)
+    compare.add_argument("--threshold", type=int, default=12)
+    compare.add_argument("--tolerance", type=float, default=0.002)
+
+    plugins = subparsers.add_parser("plugins", help="list discovered plugins or validate an adapter")
+    plugins.add_argument("--template-adapter", type=Path)
+
+    bundle = subparsers.add_parser("review-bundle", help="create a portable offline review bundle")
+    bundle.add_argument("report", type=Path)
+    bundle.add_argument("output", type=Path)
+    bundle.add_argument("--include-source", action="append", default=[], type=Path)
 
     subparsers.add_parser("doctor", help="check runtime dependencies")
     subparsers.add_parser("gui", help="launch the desktop interface")
@@ -108,9 +163,98 @@ def main(argv: list[str] | None = None) -> int:
         output = export_word_to_latex(args.input, args.output, pandoc_path=args.pandoc)
         print(f"OK  {args.input} -> {output}")
         return 0
+    if args.command == "project-convert":
+        if args.input.suffix.lower() in {".docx", ".docm"}:
+            result = word_to_latex_project(
+                args.input,
+                args.output,
+                pandoc_path=args.pandoc,
+                overwrite=args.overwrite,
+            )
+        elif args.input.suffix.lower() == ".tex":
+            result = latex_project_to_word(
+                args.input,
+                args.output,
+                pandoc_path=args.pandoc,
+                reference_docx=args.reference_docx,
+                overwrite=args.overwrite,
+            )
+        else:
+            parser.error("project-convert input must be DOCX, DOCM, or TEX")
+        print(f"OK  {result.input_path} -> {result.output_path} ({len(result.media_files)} media file(s))")
+        return 0
+    if args.command == "project-repair":
+        report_json = args.output_dir.with_suffix(".report.json") if args.report else None
+        report_html = args.output_dir.with_suffix(".report.html") if args.report else None
+        report = repair_latex_workspace(
+            args.main_tex,
+            args.output_dir,
+            overwrite=args.overwrite,
+            create_pdf=args.pdf,
+            report_path=report_json,
+            html_report_path=report_html,
+            thesis_profile=args.thesis_profile,
+            template_adapter_path=args.template_adapter,
+        )
+        print(f"OK  {report.output_path} ({report.converted} repair(s) across the project)")
+        return 0
+    if args.command == "pdf-compare":
+        report = compare_pdfs(
+            args.before,
+            args.after,
+            args.output_dir,
+            dpi=args.dpi,
+            threshold=args.threshold,
+            tolerance=args.tolerance,
+        )
+        state = "PASS" if report.passed else "CHANGED"
+        print(f"{state}  {report.changed_ratio:.4%} visual difference across {len(report.pages)} page(s)")
+        return 0 if report.passed else 1
+    if args.command == "plugins":
+        manager = PluginManager().discover()
+        for plugin in manager.plugins:
+            print(f"{plugin.name} {plugin.version} (API {plugin.api_version})")
+        for error in manager.load_errors:
+            print(f"ERROR {error}", file=sys.stderr)
+        if args.template_adapter:
+            adapter = load_template_adapter(args.template_adapter)
+            print(f"ADAPTER {adapter.name} {adapter.version} ({adapter.profile})")
+        if not manager.plugins and not manager.load_errors and not args.template_adapter:
+            print("No third-party plugins discovered. Built-in diagnostics remain active.")
+        return 1 if manager.load_errors else 0
+    if args.command == "review-bundle":
+        result = create_review_bundle(
+            args.report,
+            args.output,
+            source_paths=args.include_source,
+            include_sources=bool(args.include_source),
+        )
+        print(f"OK  {result.path} ({len(result.files)} bundled file(s))")
+        return 0
     if args.command == "scan":
         if args.input.suffix.lower() == ".tex":
-            report = analyze_latex(args.input, thesis_profile=args.thesis_profile)
+            report = analyze_latex(
+                args.input,
+                thesis_profile=args.thesis_profile,
+                template_adapter_path=args.template_adapter,
+            )
+            if args.ai_provider:
+                for item in analyze_latex_with_configured_provider(
+                    args.input.read_text(encoding="utf-8", errors="replace"),
+                    provider_name=args.ai_provider,
+                ):
+                    report.findings.append(
+                        LatexFinding(
+                            "AI_SUGGESTION",
+                            item.explanation or item.title,
+                            item.suggestion,
+                            item.line,
+                            item.severity,
+                            args.input.name,
+                            args.ai_provider,
+                        )
+                    )
+                report.detected = len(report.changes) + len(report.findings)
             print(f"{args.input.name}: {report.detected} issue(s), {len(report.changes)} automatic repair(s)")
             for change in report.changes:
                 print(f"  line {change.line}: {change.before!r} -> {change.after!r} ({change.reason})")
@@ -152,6 +296,7 @@ def main(argv: list[str] | None = None) -> int:
                     report_path=report_path,
                     html_report_path=html_report_path,
                     thesis_profile=args.thesis_profile,
+                    template_adapter_path=args.template_adapter,
                 )
                 print(f"OK  {input_path.name} -> {output} ({report.converted}/{report.detected} repaired)")
                 continue

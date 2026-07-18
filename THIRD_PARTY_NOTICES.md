@@ -28,10 +28,14 @@ with the applicable LGPL/GPL option for the exact bundled version.
 
 - Project and licensing: https://doc.qt.io/qtforpython-6/licenses.html
 
-## lxml and pypdf
+## lxml, Pillow, pypdf and pypdfium2/PDFium
 
-MathFixer uses lxml for OOXML processing and pypdf for PDF structure validation.
-Both projects retain their own copyright and permissive license notices.
+MathFixer uses lxml for OOXML processing, Pillow for image operations, pypdf for
+PDF structure validation, and pypdfium2/PDFium for sandboxable page rendering.
+All projects retain their own copyright and license notices. Binary distributors
+must preserve the notices for the exact bundled versions.
 
 - lxml: https://github.com/lxml/lxml
+- Pillow: https://github.com/python-pillow/Pillow
 - pypdf: https://github.com/py-pdf/pypdf
+- pypdfium2 and PDFium notices: https://github.com/pypdfium2-team/pypdfium2
