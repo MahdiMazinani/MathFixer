@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__
+from .core.output_naming import choose_available_directory, choose_available_output
 from .docx_engine import convert_document, scan_document
 from .features.ai_assistant import AIAnalysisError, analyze_latex_with_configured_provider
 from .features.latex_project import (
@@ -766,6 +767,11 @@ class MainWindow(QMainWindow):
             if item.latex_output:
                 outputs.append(item.latex_output.name)
             status = self.t(item.status_key)
+            if item.status_key == "state_failed" and item.error:
+                status = self.t(
+                    "state_failed_reason",
+                    reason=self._friendly_error(item.error),
+                )
             if row == self._active_item_index and self._busy and item.progress_value:
                 detail = self._localized_progress_detail(item.progress_detail)
                 status = self.t(
@@ -881,6 +887,20 @@ class MainWindow(QMainWindow):
             if any(normalized.startswith(prefix) for prefix in prefixes):
                 return self.t(key)
         return detail or self.t("stage_working")
+
+    def _friendly_error(self, message: str) -> str:
+        normalized = message.lower()
+        reasons = (
+            (("fileexistserror", "already exists"), "error_output_exists"),
+            (("permissionerror", "permission denied", "access is denied"), "error_permission"),
+            (("pandoc_timeout", "pandoc exceeded", "pandoc reached"), "error_pandoc_timeout"),
+            (("no selected formula", "no selected formula could"), "error_no_safe_formula"),
+            (("unsafe document", "not a valid word", "badzipfile"), "error_invalid_document"),
+        )
+        for fragments, key in reasons:
+            if any(fragment in normalized for fragment in fragments):
+                return self.t(key)
+        return self.t("error_generic")
 
     def _on_progress(self, value: int, _technical_text: str) -> None:
         self.progress.setValue(value)
@@ -1021,7 +1041,13 @@ class MainWindow(QMainWindow):
             self.status_label.setText(self.t("finished", count=completed))
             self.refresh_queue()
             if failed:
-                message = self.t("finished_with_errors", completed=completed, failed=failed)
+                first_error = next(item.error for item in self.items if item.status_key == "state_failed")
+                message = self.t(
+                    "finished_with_errors_detail",
+                    completed=completed,
+                    failed=failed,
+                    reason=self._friendly_error(first_error),
+                )
             elif completed_with_warnings:
                 message = self.t("finished_with_warnings", count=completed_with_warnings)
             else:
@@ -1039,6 +1065,18 @@ class MainWindow(QMainWindow):
         )
         suffix = self.suffix.text().strip() or "_mathfixed"
         output = destination / f"{item.path.stem}{suffix}{item.path.suffix.lower()}"
+        if not self.overwrite_checkbox.isChecked():
+            companion_suffixes: list[str] = []
+            if self.reports.isChecked():
+                companion_suffixes.extend([".report.json", ".report.html"])
+            if self.pdf_checkbox.isChecked():
+                companion_suffixes.append(".pdf")
+            if self.export_latex_checkbox.isChecked() and item.path.suffix.lower() != ".tex":
+                companion_suffixes.append(".tex")
+            output = choose_available_output(
+                output,
+                companion_suffixes=companion_suffixes,
+            )
         report_path = output.with_suffix(".report.json") if self.reports.isChecked() else None
         html_report_path = output.with_suffix(".report.html") if self.reports.isChecked() else None
         pdf_path = output.with_suffix(".pdf") if self.pdf_checkbox.isChecked() else None
@@ -1054,6 +1092,8 @@ class MainWindow(QMainWindow):
                 project_name = f"{item.path.parent.name}{suffix}"
                 project_parent = destination if self.output_dir.text().strip() else item.path.parent.parent
                 project_output = project_parent / project_name
+                if not self.overwrite_checkbox.isChecked():
+                    project_output = choose_available_directory(project_output)
                 project_report = (
                     project_output.parent / f"{project_output.name}.report.json"
                     if self.reports.isChecked()

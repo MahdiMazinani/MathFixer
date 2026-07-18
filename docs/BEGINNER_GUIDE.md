@@ -16,4 +16,6 @@ If atomic conversion fails, wait while MathFixer automatically prepares review d
 
 The document row shows the current Word stage. **Converting formulas with Pandoc** normally completes in seconds and has a 45-second total limit in version 2.0.3. If an older version remains there for minutes, close it, install the latest Release, and retry; the source file is never modified. A document with no detected formulas skips Pandoc.
 
+If a previous output already exists and replacement is off, version 2.0.4 keeps the old file and automatically writes `_mathfixed_2`, `_mathfixed_3`, and so on. You do not need to delete earlier results or enable replacement.
+
 For DOCM files, PDF export requires desktop Microsoft Word so VBA can be force-disabled. For TEX-to-PDF, XeLaTeX must be installed separately.

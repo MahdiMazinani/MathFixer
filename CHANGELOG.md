@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.4 — 2026-07-18
+
+- Fixed every retry being reported as failed when the intended output filename already existed.
+- When replacement is off, automatically selects a safe numbered sibling such as `_mathfixed_2.docx`; existing DOCX, PDF, reports and TEX outputs remain untouched.
+- Applied the same non-conflicting naming policy to complete LaTeX project output directories.
+- Displayed a localized, readable failure reason directly in the queue and final summary instead of hiding the technical exception only in a tooltip.
+- Expanded the real Windows GUI conversion test to begin with an occupied output name and verify that it publishes the numbered output without replacing the existing file.
+
 ## 2.0.3 — 2026-07-18
 
 - Fixed the remaining Word conversion hang when AI, thesis mode, PDF and atomic mode are all off.

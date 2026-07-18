@@ -15,6 +15,8 @@ def run_real_conversion(app: QApplication) -> None:
     with tempfile.TemporaryDirectory() as directory:
         source = Path(directory, "small-formulas.docx")
         write_smoke_document(source)
+        occupied = Path(directory, "small-formulas_mathfixed.docx")
+        occupied.write_bytes(b"existing output must not be replaced")
         window = MainWindow()
         window.reports.setChecked(False)
         window.atomic.setChecked(False)
@@ -57,6 +59,8 @@ def run_real_conversion(app: QApplication) -> None:
         assert window.items[0].status_key in {"state_completed", "state_completed_warning"}
         assert window.items[0].output is not None
         assert window.items[0].output.exists()
+        assert window.items[0].output.name == "small-formulas_mathfixed_2.docx"
+        assert occupied.read_bytes() == b"existing output must not be replaced"
         assert window.items[0].progress_value == 100
         assert not window._workers, "finished TaskWorker was not released"
         window.close()
