@@ -40,8 +40,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      - name: Install Pandoc
+        run: choco install pandoc --yes --no-progress
       - run: pip install -e ".[gui]"
-      - name: Construct GUI and verify recovery workflow
+      - name: Convert a real DOCX through the GUI worker
         shell: powershell
         run: |
           $env:QT_QPA_PLATFORM = "offscreen"
