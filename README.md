@@ -86,6 +86,8 @@ Keep the thesis profile at **Off — no university template** for ordinary docum
 
 Select **Scan & repair files** once. Detection, repair, validation, and output creation run in sequence. Word is scanned only once on the default path. If AI was explicitly enabled for TEX, its diagnostic preflight runs first and the status bar shows the waiting stage and timeout.
 
+For Word files, the queue row now shows the active stage: opening, formula scan, Pandoc conversion, safe patching, writing, or validation. Pandoc has a 30-second batch limit and a 45-second limit for the complete formula-conversion stage. A timeout stops the process tree and fails safely instead of being repeated for every remaining batch. Documents with no detected formulas do not start Pandoc at all.
+
 After completion, the dashboard shows problems, repairs, warnings, and output counts. Double-click a row or use **Review selected**.
 
 For Word formulas you can:
@@ -328,6 +330,7 @@ Ambiguous candidates require human review.
 | No formulas detected | Try Balanced mode; use Aggressive only after reviewing false positives |
 | Too many false positives | Switch to Safe mode and keep explicit `$...$`, `\(...\)`, or display delimiters |
 | First conversion failed | Choose **Review selected** after automatic recovery; disable or correct false positives, then retry |
+| Conversion stays at the Pandoc/formula stage | Version 2.0.3 stops the complete Pandoc stage after at most 45 seconds. If an older version waits longer, close it, install the latest Release, and retry. The original file is unchanged |
 | Conversion stays near 90% | Optional PDF export is running; each engine is stopped after 45 seconds and valid Word output is preserved with a warning |
 | PDF cannot be created | Install Word/LibreOffice for DOCX or XeLaTeX for TEX; retrieve the validated Word file with **Open output** |
 | DOCM PDF rejected | Use Microsoft Word on Windows; LibreOffice DOCM PDF is intentionally blocked |
@@ -458,6 +461,7 @@ For signing, pass a PFX path/password to `build_installer.ps1`. GitHub Actions r
 
 - **v1.3 scope:** multi-file evidence, exact log locations, template adapters, visual PDF regression, installer/signing integration.
 - **v2.0 scope:** stable plugin/API contract, bidirectional project conversion with media, private/local AI providers, and opt-in collaboration bundles.
+- **v2.0.3 reliability patch:** bounded Pandoc conversion, retained GUI workers, visible processing stages, and frozen-EXE conversion smoke coverage.
 
 See [CHANGELOG.md](CHANGELOG.md) and [ROADMAP.md](docs/ROADMAP.md) for release details.
 
