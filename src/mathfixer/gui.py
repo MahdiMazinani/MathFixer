@@ -210,6 +210,7 @@ class WorkerSignals(QObject):
     progress = Signal(int, str)
     completed = Signal(object)
     failed = Signal(str)
+    finished = Signal(object)
 
 
 class TaskWorker(QRunnable):
@@ -222,6 +223,7 @@ class TaskWorker(QRunnable):
 
     def run(self) -> None:
         try:
+            self.signals.progress.emit(1, "Starting background task")
             result = self.function(
                 *self.args,
                 progress=lambda value, text: self.signals.progress.emit(value, text),
@@ -231,6 +233,8 @@ class TaskWorker(QRunnable):
         except Exception as exc:
             details = "".join(traceback.format_exception_only(type(exc), exc)).strip()
             self.signals.failed.emit(details)
+        finally:
+            self.signals.finished.emit(self)
 
 
 class DropZone(QFrame):
@@ -411,6 +415,10 @@ class MainWindow(QMainWindow):
             self.theme_name = "dark"
         self.items: list[QueueItem] = []
         self.pool = QThreadPool.globalInstance()
+        # Keep QRunnable wrappers alive until Qt has delivered every queued signal.
+        # Without this, a fast or failed task can lose its completion callback in
+        # frozen Windows builds and leave the row permanently marked as busy.
+        self._workers: set[TaskWorker] = set()
         self._busy = False
         self._convert_after_scan = False
         self._active_item_index: int | None = None
@@ -536,6 +544,7 @@ class MainWindow(QMainWindow):
         self.queue.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.queue.verticalHeader().setVisible(False)
         self.queue.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.queue.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.queue.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.queue.doubleClicked.connect(lambda _: self.preview_selected())
         left_layout.addWidget(self.queue, 1)
@@ -758,7 +767,12 @@ class MainWindow(QMainWindow):
                 outputs.append(item.latex_output.name)
             status = self.t(item.status_key)
             if row == self._active_item_index and self._busy and item.progress_value:
-                status = self.t("state_processing_percent", value=item.progress_value)
+                detail = self._localized_progress_detail(item.progress_detail)
+                status = self.t(
+                    "state_processing_stage",
+                    value=item.progress_value,
+                    detail=detail,
+                )
             values = [
                 item.path.name,
                 str(selected) if item.candidates else "-",
@@ -840,21 +854,47 @@ class MainWindow(QMainWindow):
     def _start(self, function, on_done, *args, on_error=None, **kwargs) -> None:
         self._set_busy(True)
         worker = TaskWorker(function, *args, **kwargs)
+        self._workers.add(worker)
         worker.signals.progress.connect(self._on_progress)
         worker.signals.completed.connect(on_done)
         worker.signals.failed.connect(on_error or self._on_error)
+        worker.signals.finished.connect(self._release_worker)
         self.pool.start(worker)
+
+    def _release_worker(self, worker: TaskWorker) -> None:
+        self._workers.discard(worker)
+
+    def _localized_progress_detail(self, detail: str) -> str:
+        normalized = detail.strip().lower()
+        stages = (
+            (("starting background",), "stage_starting"),
+            (("opening word",), "stage_opening_word"),
+            (("scanning ",), "stage_scanning_word"),
+            (("converting formula", "pandoc formula"), "stage_pandoc"),
+            (("no convertible",), "stage_no_formulas"),
+            (("patching ",), "stage_patching"),
+            (("writing an atomic",), "stage_writing"),
+            (("conversion and validation",), "stage_validating"),
+            (("exporting pdf",), "stage_pdf"),
+        )
+        for prefixes, key in stages:
+            if any(normalized.startswith(prefix) for prefix in prefixes):
+                return self.t(key)
+        return detail or self.t("stage_working")
 
     def _on_progress(self, value: int, _technical_text: str) -> None:
         self.progress.setValue(value)
         detail = _technical_text.strip()
+        display_detail = self._localized_progress_detail(detail)
         if self._active_item_index is not None and self._active_item_index < len(self.items):
             item = self.items[self._active_item_index]
             item.progress_value = value
             item.progress_detail = detail
             self.refresh_queue()
         if detail:
-            self.status_label.setText(self.t("processing_detail", value=value, detail=detail))
+            self.status_label.setText(
+                self.t("processing_detail", value=value, detail=display_detail)
+            )
         else:
             self.status_label.setText(self.t("processing", value=value))
 
@@ -1071,6 +1111,8 @@ class MainWindow(QMainWindow):
             create_pdf=self.pdf_checkbox.isChecked(),
             pdf_output_path=pdf_path,
             pdf_engine="auto",
+            pandoc_timeout=30,
+            pandoc_total_timeout=45,
             pdf_timeout=45,
             fail_on_pdf_error=False,
             report_path=report_path,
