@@ -48,3 +48,33 @@ jobs:
         run: |
           $env:QT_QPA_PLATFORM = "offscreen"
           python tests/gui_smoke.py
+
+  frozen-exe-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Pandoc
+        run: choco install pandoc --yes --no-progress
+      - name: Build frozen GUI executable
+        shell: powershell
+        run: .\scripts\build_windows.ps1 -Python python
+      - name: Convert a real DOCX with the frozen EXE
+        shell: powershell
+        run: |
+          python tests\smoke_document.py smoke-input.docx
+          $inputPath = (Resolve-Path smoke-input.docx).Path
+          $outputPath = Join-Path $PWD "smoke-output.docx"
+          $process = Start-Process -FilePath "dist\MathFixer.exe" -ArgumentList @("--self-test", $inputPath, $outputPath) -PassThru
+          if (-not $process.WaitForExit(45000)) {
+            Stop-Process -Id $process.Id -Force
+            throw "Frozen MathFixer.exe exceeded the 45-second conversion smoke limit."
+          }
+          if ($process.ExitCode -ne 0 -or -not (Test-Path $outputPath)) {
+            $errorPath = [IO.Path]::ChangeExtension($outputPath, ".error.txt")
+            if (Test-Path $errorPath) { Get-Content $errorPath }
+            throw "Frozen MathFixer.exe could not convert a real DOCX with embedded Pandoc."
+          }
