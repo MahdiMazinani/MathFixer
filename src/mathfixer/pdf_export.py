@@ -46,6 +46,33 @@ def _powershell() -> str | None:
     return shutil.which("powershell.exe") or shutil.which("powershell") or shutil.which("pwsh")
 
 
+def _run_bounded(command: list[str], *, timeout: int, engine_name: str) -> subprocess.CompletedProcess[str]:
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        if os.name == "nt" and shutil.which("taskkill"):
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True,
+                check=False,
+            )
+        else:
+            process.kill()
+        process.communicate()
+        raise PdfExportError(
+            f"{engine_name} exceeded the {timeout}-second PDF timeout and was stopped."
+        ) from exc
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
 def _export_with_word(source: Path, output: Path, timeout: int) -> None:
     if os.name != "nt":
         raise PdfExportError("Microsoft Word PDF export is available only on Windows.")
@@ -78,7 +105,7 @@ finally {
     with tempfile.TemporaryDirectory(prefix="mathfixer-word-pdf-") as directory:
         script_path = Path(directory, "export_pdf.ps1")
         script_path.write_text(script, encoding="utf-8-sig")
-        process = subprocess.run(
+        process = _run_bounded(
             [
                 executable,
                 "-NoProfile",
@@ -92,12 +119,8 @@ finally {
                 "-OutputPath",
                 str(output),
             ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=timeout,
-            check=False,
+            engine_name="Microsoft Word",
         )
     if process.returncode != 0:
         detail = (process.stderr or process.stdout).strip()[-1200:]
@@ -140,14 +163,10 @@ def _export_with_libreoffice(source: Path, output: Path, timeout: int) -> None:
             str(out_dir),
             str(source),
         ]
-        process = subprocess.run(
+        process = _run_bounded(
             command,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=timeout,
-            check=False,
+            engine_name="LibreOffice",
         )
         generated = out_dir / f"{source.stem}.pdf"
         if process.returncode != 0 or not generated.exists():

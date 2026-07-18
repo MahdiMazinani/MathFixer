@@ -116,7 +116,10 @@ class QueueItem:
     html_report: Path | None = None
     latex_output: Path | None = None
     findings: list[LatexFinding] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     error: str = ""
+    progress_value: int = 0
+    progress_detail: str = ""
 
 
 @dataclass(slots=True)
@@ -410,6 +413,7 @@ class MainWindow(QMainWindow):
         self.pool = QThreadPool.globalInstance()
         self._busy = False
         self._convert_after_scan = False
+        self._active_item_index: int | None = None
         self.resize(1280, 840)
         self.setMinimumSize(900, 650)
         self._apply_theme()
@@ -752,28 +756,33 @@ class MainWindow(QMainWindow):
                 outputs.append(item.pdf_output.name)
             if item.latex_output:
                 outputs.append(item.latex_output.name)
+            status = self.t(item.status_key)
+            if row == self._active_item_index and self._busy and item.progress_value:
+                status = self.t("state_processing_percent", value=item.progress_value)
             values = [
                 item.path.name,
                 str(selected) if item.candidates else "-",
                 str(sum(bool(candidate.repairs) for candidate in item.candidates)) if item.candidates else "-",
-                self.t(item.status_key),
+                status,
                 " + ".join(outputs) if outputs else "-",
             ]
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(value)
                 if column == 0:
                     cell.setToolTip(str(item.path))
-                if column == 3 and item.error:
-                    cell.setToolTip(item.error)
+                if column == 3:
+                    cell.setToolTip(item.error or item.progress_detail)
                 self.queue.setItem(row, column, cell)
         enabled = bool(self.items) and not self._busy
         self.process_button.setEnabled(enabled)
         if hasattr(self, "metric_values"):
             found = sum(len(item.candidates) + len(item.findings) for item in self.items)
             fixed = sum(
-                len(item.candidates) for item in self.items if item.status_key == "state_completed"
+                len(item.candidates)
+                for item in self.items
+                if item.status_key in {"state_completed", "state_completed_warning"}
             )
-            warnings = sum(len(item.findings) for item in self.items)
+            warnings = sum(len(item.findings) + len(item.warnings) for item in self.items)
             outputs = sum(bool(item.output) + bool(item.pdf_output) + bool(item.latex_output) for item in self.items)
             self.metric_values["found"].setText(str(found))
             self.metric_values["fixed"].setText(str(fixed))
@@ -786,7 +795,11 @@ class MainWindow(QMainWindow):
             return
         item = self.items[rows[0]]
         if not item.candidates and not item.findings:
-            QMessageBox.information(self, self.t("scan_first"), self.t("scan_first_message"))
+            QMessageBox.information(
+                self,
+                self.t("review_not_ready"),
+                self.t("review_not_ready_message"),
+            )
             return
         if item.path.suffix.lower() == ".tex":
             LatexPreviewDialog(item, self.language, self).exec()
@@ -835,6 +848,11 @@ class MainWindow(QMainWindow):
     def _on_progress(self, value: int, _technical_text: str) -> None:
         self.progress.setValue(value)
         detail = _technical_text.strip()
+        if self._active_item_index is not None and self._active_item_index < len(self.items):
+            item = self.items[self._active_item_index]
+            item.progress_value = value
+            item.progress_detail = detail
+            self.refresh_queue()
         if detail:
             self.status_label.setText(self.t("processing_detail", value=value, detail=detail))
         else:
@@ -886,6 +904,9 @@ class MainWindow(QMainWindow):
                 self.refresh_queue()
             return
         item = self.items[index]
+        self._active_item_index = index
+        item.progress_value = 0
+        item.progress_detail = ""
         item.status_key = "state_scanning"
         self.refresh_queue()
         self._start(
@@ -918,9 +939,11 @@ class MainWindow(QMainWindow):
                 for change in report.changes
             ]
             item.findings = report.findings
+            item.warnings = []
         else:
             item.candidates = report.candidates
             item.findings = []
+            item.warnings = [warning.message for warning in report.warnings]
         item.enabled_ids = {candidate.candidate_id for candidate in item.candidates}
 
     def _scan_completed(self, index: int, result) -> None:
@@ -944,19 +967,31 @@ class MainWindow(QMainWindow):
 
     def _convert_next(self, index: int) -> None:
         if index >= len(self.items):
+            self._active_item_index = None
             self._set_busy(False)
             self.progress.setValue(100)
-            completed = sum(item.status_key == "state_completed" for item in self.items)
+            completed = sum(
+                item.status_key in {"state_completed", "state_completed_warning"}
+                for item in self.items
+            )
+            completed_with_warnings = sum(
+                item.status_key == "state_completed_warning" for item in self.items
+            )
             failed = sum(item.status_key == "state_failed" for item in self.items)
             self.status_label.setText(self.t("finished", count=completed))
             self.refresh_queue()
             if failed:
                 message = self.t("finished_with_errors", completed=completed, failed=failed)
+            elif completed_with_warnings:
+                message = self.t("finished_with_warnings", count=completed_with_warnings)
             else:
                 message = self.t("all_valid_pdf") if self.pdf_checkbox.isChecked() else self.t("all_valid")
             QMessageBox.information(self, "MathFixer", message)
             return
         item = self.items[index]
+        self._active_item_index = index
+        item.progress_value = 0
+        item.progress_detail = ""
         destination = (
             Path(self.output_dir.text()).expanduser()
             if self.output_dir.text().strip()
@@ -1036,6 +1071,8 @@ class MainWindow(QMainWindow):
             create_pdf=self.pdf_checkbox.isChecked(),
             pdf_output_path=pdf_path,
             pdf_engine="auto",
+            pdf_timeout=45,
+            fail_on_pdf_error=False,
             report_path=report_path,
             html_report_path=html_report_path,
             report_language=self.language,
@@ -1049,7 +1086,9 @@ class MainWindow(QMainWindow):
         else:
             report = result
         self._store_report_on_item(item, report)
-        item.status_key = "state_completed"
+        item.status_key = "state_completed_warning" if item.warnings else "state_completed"
+        item.error = item.warnings[0] if item.warnings else ""
+        item.progress_value = 100
         item.output = output
         item.pdf_output = Path(report.pdf_path) if report.pdf_path else None
         item.html_report = html_report_path if html_report_path and html_report_path.exists() else None
@@ -1060,8 +1099,42 @@ class MainWindow(QMainWindow):
 
     def _convert_failed(self, index: int, message: str) -> None:
         item = self.items[index]
+        item.error = message
+        item.status_key = "state_preparing_review"
+        item.progress_value = 0
+        item.progress_detail = self.t("preparing_review_detail")
+        self._active_item_index = index
+        self.refresh_queue()
+        self._start(
+            scan_any_document,
+            lambda result, i=index, original=message: self._convert_failure_scanned(
+                i, original, result
+            ),
+            item.path,
+            on_error=lambda scan_error, i=index, original=message: self._convert_failure_scan_failed(
+                i, original, scan_error
+            ),
+            mode=self.selected_mode,
+            ai_enabled=False,
+            ai_provider="openai",
+            thesis_profile=str(self.thesis_profile.currentData()),
+        )
+
+    def _convert_failure_scanned(self, index: int, message: str, result) -> None:
+        item = self.items[index]
+        self._store_report_on_item(item, result.report)
         item.status_key = "state_failed"
         item.error = message
+        item.progress_value = 100
+        self._set_busy(False)
+        self.refresh_queue()
+        self._convert_next(index + 1)
+
+    def _convert_failure_scan_failed(self, index: int, message: str, scan_error: str) -> None:
+        item = self.items[index]
+        item.status_key = "state_failed"
+        item.error = f"{message} | Review preparation also failed: {scan_error}"
+        item.progress_value = 0
         self._set_busy(False)
         self.refresh_queue()
         self._convert_next(index + 1)

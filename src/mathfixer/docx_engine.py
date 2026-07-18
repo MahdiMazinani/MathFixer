@@ -301,6 +301,8 @@ def convert_document(
     create_pdf: bool = False,
     pdf_output_path: str | os.PathLike[str] | None = None,
     pdf_engine: str = "auto",
+    pdf_timeout: int = 180,
+    fail_on_pdf_error: bool = True,
     report_path: str | os.PathLike[str] | None = None,
     html_report_path: str | os.PathLike[str] | None = None,
     report_language: str = "en",
@@ -339,7 +341,8 @@ def convert_document(
     if missing and fail_on_formula_error:
         raise ConversionAbortedError(
             f"Atomic conversion stopped: {len(missing)} formula(s) could not be converted. "
-            "The source document was not changed. Run a scan/report to review them."
+            "The source document was not changed. Review the detected items, disable or correct "
+            "the failed candidates, and retry."
         )
 
     modified: dict[str, bytes] = {}
@@ -433,15 +436,28 @@ def convert_document(
                 delete=False,
             ) as pdf_handle:
                 pdf_temp_path = Path(pdf_handle.name)
-            pdf_result = export_docx_to_pdf(
-                temp_path,
-                pdf_temp_path,
-                engine=pdf_engine,
-                overwrite=True,
-                progress=progress,
-            )
+            try:
+                pdf_result = export_docx_to_pdf(
+                    temp_path,
+                    pdf_temp_path,
+                    engine=pdf_engine,
+                    overwrite=True,
+                    timeout=pdf_timeout,
+                    progress=progress,
+                )
+            except Exception as exc:
+                if fail_on_pdf_error:
+                    raise
+                report.warnings.append(
+                    ConversionWarning(
+                        code="PDF_EXPORT_FAILED",
+                        message=f"The repaired Word file is valid, but PDF export failed: {exc}",
+                    )
+                )
+                if progress:
+                    progress(99, "PDF export failed; publishing the validated Word file")
         os.replace(temp_path, target)
-        if pdf_temp_path is not None and pdf_target is not None:
+        if pdf_result is not None and pdf_temp_path is not None and pdf_target is not None:
             os.replace(pdf_temp_path, pdf_target)
     finally:
         temp_path.unlink(missing_ok=True)

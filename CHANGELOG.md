@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.2 — 2026-07-18
+
+- Fixed the apparent conversion hang caused by optional PDF engines waiting up to six minutes.
+- Limited each GUI PDF engine to 45 seconds and terminated its child process tree on timeout.
+- Preserved the validated Word output when optional PDF generation fails and surfaced a visible warning.
+- Added automatic recovery scanning after conversion errors so Review selected works without a separate scan action.
+- Replaced the obsolete Scan first message with processing/recovery guidance and added per-file progress percentages.
+- Added Windows GUI recovery smoke coverage and PDF timeout/nonfatal-output regression tests.
+
 ## 2.0.1 — 2026-07-18
 
 - Replaced the confusing two-button desktop scan/convert flow with one **Scan & repair files** action.

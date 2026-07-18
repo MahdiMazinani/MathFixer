@@ -73,8 +73,8 @@ Detection does not modify the document.
 ### 3. Choose outputs
 
 - **Readable HTML + JSON reports:** recommended for every important document.
-- **Atomic mode:** if any selected Word formula cannot be converted safely, publish nothing.
-- **Create PDF:** builds and validates a PDF when Word/LibreOffice/XeLaTeX is available.
+- **Atomic mode:** if any selected Word formula cannot be converted safely, publish no incomplete document. After failure, MathFixer automatically prepares detected items for **Review selected**; disable or correct a false positive and retry.
+- **Create PDF:** optional. In the GUI, Word and LibreOffice each get 45 seconds. PDF failure preserves the validated Word output and appears as a warning.
 - **Export Word to LaTeX:** creates an additional LaTeX result.
 - **AI diagnostics:** **Off — recommended** makes no AI request. Selecting a provider explicitly sends TEX text and may wait up to 90 seconds.
 - **Complete LaTeX project:** follows safe local `\input`, `\include`, and `\subfile` references and repairs a copied project.
@@ -185,7 +185,7 @@ Adapters are data-only and cannot execute template code.
 
 ## PDF creation and visual comparison
 
-DOCX PDF export prefers Microsoft Word on Windows and then LibreOffice. DOCM PDF export is accepted only through Word with VBA automation force-disabled; LibreOffice DOCM export is rejected because macro behavior cannot be verified. TEX PDF export requires XeLaTeX.
+DOCX PDF export prefers Microsoft Word on Windows and then LibreOffice. Each GUI engine has a 45-second timeout and its child process tree is stopped when that limit is exceeded. If both engines fail, the validated DOCX remains available and the row is marked **Completed with warnings**. DOCM PDF export is accepted only through Word with VBA automation force-disabled; LibreOffice DOCM export is rejected because macro behavior cannot be verified. TEX PDF export requires XeLaTeX.
 
 To compare two PDFs in the GUI, choose **Compare PDFs**, select original and repaired files, and select an output folder. MathFixer renders every page, checks page count and geometry, computes a pixel-difference ratio, writes red difference heatmaps, and saves `visual-comparison.json`.
 
@@ -327,7 +327,9 @@ Ambiguous candidates require human review.
 | Pandoc missing | Use the portable Windows release, or install Pandoc and run `mathfixer doctor` |
 | No formulas detected | Try Balanced mode; use Aggressive only after reviewing false positives |
 | Too many false positives | Switch to Safe mode and keep explicit `$...$`, `\(...\)`, or display delimiters |
-| PDF cannot be created | Install Word/LibreOffice for DOCX or XeLaTeX for TEX; inspect the reported engine error |
+| First conversion failed | Choose **Review selected** after automatic recovery; disable or correct false positives, then retry |
+| Conversion stays near 90% | Optional PDF export is running; each engine is stopped after 45 seconds and valid Word output is preserved with a warning |
+| PDF cannot be created | Install Word/LibreOffice for DOCX or XeLaTeX for TEX; retrieve the validated Word file with **Open output** |
 | DOCM PDF rejected | Use Microsoft Word on Windows; LibreOffice DOCM PDF is intentionally blocked |
 | AI unavailable | Verify provider selection and environment variables; deterministic repair still works |
 | Include reported unsafe | Move the included TEX file inside the project root and use a relative path |
