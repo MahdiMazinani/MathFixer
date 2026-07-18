@@ -30,6 +30,21 @@ jobs:
       - name: Build self-contained executable
         shell: powershell
         run: .\scripts\build_windows.ps1 -Python python
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+      - name: Build installer and sign when a certificate is configured
+        shell: powershell
+        env:
+          MATHFIXER_CERTIFICATE_BASE64: ${{ secrets.MATHFIXER_CERTIFICATE_BASE64 }}
+          MATHFIXER_CERTIFICATE_PASSWORD: ${{ secrets.MATHFIXER_CERTIFICATE_PASSWORD }}
+        run: |
+          $certificate = ""
+          if (-not [string]::IsNullOrWhiteSpace($env:MATHFIXER_CERTIFICATE_BASE64)) {
+            $certificate = Join-Path $env:RUNNER_TEMP "mathfixer-signing.pfx"
+            [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:MATHFIXER_CERTIFICATE_BASE64))
+          }
+          $version = $env:GITHUB_REF_NAME -replace '^release-v', '' -replace '^v', ''
+          .\scripts\build_installer.ps1 -Version $version -CertificatePath $certificate -CertificatePassword $env:MATHFIXER_CERTIFICATE_PASSWORD
       - name: Package beginner download
         shell: powershell
         run: |
@@ -41,14 +56,22 @@ jobs:
           Copy-Item docs\guide-fa.css package\guide-fa.css
           Copy-Item docs\guide-en.css package\guide-en.css
           Copy-Item CHANGELOG.md package\CHANGELOG.md
+          Copy-Item README.md package\README.md
+          Copy-Item README_FA.md package\README_FA.md
           Copy-Item examples package\examples -Recurse
           Compress-Archive -Path package\* -DestinationPath MathFixer-Windows-Portable.zip -Force
-          (Get-FileHash MathFixer-Windows-Portable.zip -Algorithm SHA256).Hash.ToLower() + "  MathFixer-Windows-Portable.zip" | Set-Content SHA256SUMS.txt
+          Copy-Item dist\MathFixer-Setup.exe MathFixer-Setup.exe
+          $checksums = @(
+            (Get-FileHash MathFixer-Windows-Portable.zip -Algorithm SHA256).Hash.ToLower() + "  MathFixer-Windows-Portable.zip"
+            (Get-FileHash MathFixer-Setup.exe -Algorithm SHA256).Hash.ToLower() + "  MathFixer-Setup.exe"
+          )
+          $checksums | Set-Content SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: MathFixer-Windows-Portable
           path: |
             MathFixer-Windows-Portable.zip
+            MathFixer-Setup.exe
             SHA256SUMS.txt
 
   publish-release:
@@ -67,7 +90,7 @@ jobs:
         run: |
           TAG="$GITHUB_REF_NAME"
           TAG="${TAG#release-}"
-          gh release create "$TAG" MathFixer-Windows-Portable.zip SHA256SUMS.txt \
+          gh release create "$TAG" MathFixer-Windows-Portable.zip MathFixer-Setup.exe SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "MathFixer $TAG" \

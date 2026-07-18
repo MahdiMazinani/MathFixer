@@ -45,15 +45,34 @@ def _change_rows(candidates: Iterable[dict[str, Any]]) -> str:
     return "".join(rows) or '<tr><td colspan="4">No changes were required.</td></tr>'
 
 
+def _finding_rows(findings: Iterable[dict[str, Any]]) -> str:
+    rows: list[str] = []
+    for item in findings:
+        location = str(item.get("file") or item.get("part") or "")
+        line = item.get("line")
+        if line is not None:
+            location = f"{location}:{line}" if location else f"line {line}"
+        severity = str(item.get("severity", "warning")).lower()
+        rows.append(
+            f'<tr class="severity-{html.escape(severity)}">'
+            f"<td><code>{html.escape(str(item.get('code', 'DIAGNOSTIC')))}</code></td>"
+            f"<td>{html.escape(str(item.get('message', '')))}</td>"
+            f"<td>{html.escape(str(item.get('suggestion', '')))}</td>"
+            f"<td>{html.escape(location or '-')}</td>"
+            "</tr>"
+        )
+    return "".join(rows)
+
+
 def write_html_report(path: Path, report: dict[str, Any], *, language: str = "en") -> None:
     rtl = language == "fa"
     title = "گزارش اصلاحات MathFixer" if rtl else "MathFixer repair report"
     labels = (
-        ("قبل", "بعد", "دلیل", "محل", "یافت‌شده", "تبدیل‌شده", "ردشده")
+        ("قبل", "بعد", "دلیل", "محل", "یافت‌شده", "تبدیل‌شده", "ردشده", "هشدارها", "کد", "پیام", "پیشنهاد")
         if rtl else
-        ("Before", "After", "Reason", "Location", "Detected", "Converted", "Skipped")
+        ("Before", "After", "Reason", "Location", "Detected", "Converted", "Skipped", "Diagnostics", "Code", "Message", "Suggestion")
     )
-    before, after, reason, location, detected, converted, skipped = labels
+    before, after, reason, location, detected, converted, skipped, diagnostics, code, message, suggestion = labels
     document = html.escape(Path(str(report.get("input_path", ""))).name)
     body = f"""<!doctype html>
 <html lang="{'fa' if rtl else 'en'}" dir="{'rtl' if rtl else 'ltr'}">
@@ -65,11 +84,14 @@ main{{max-width:1100px;margin:36px auto;padding:0 20px}}h1{{margin-bottom:4px}}.
 .cards{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:24px 0}}.card{{background:white;border:1px solid #d9e2ec;border-radius:14px;padding:18px}}
 .value{{font-size:28px;font-weight:750;color:#195cc7}}table{{width:100%;border-collapse:collapse;background:white;border-radius:14px;overflow:hidden}}
 th,td{{padding:13px;text-align:{'right' if rtl else 'left'};border-bottom:1px solid #e5eaf0;vertical-align:top}}th{{background:#eaf2fb}}code{{white-space:pre-wrap;word-break:break-word;color:#7c2d12}}
+.severity-error td:first-child{{border-inline-start:4px solid #dc2626}}.severity-warning td:first-child{{border-inline-start:4px solid #d97706}}
 @media(max-width:700px){{.cards{{grid-template-columns:1fr}}table{{font-size:13px}}}}
 </style><main><h1>{title}</h1><div class="muted">{document}</div>
 <section class="cards"><div class="card"><div class="value">{report.get('detected', 0)}</div>{detected}</div>
 <div class="card"><div class="value">{report.get('converted', 0)}</div>{converted}</div>
 <div class="card"><div class="value">{report.get('skipped', 0)}</div>{skipped}</div></section>
 <table><thead><tr><th>{before}</th><th>{after}</th><th>{reason}</th><th>{location}</th></tr></thead>
-<tbody>{_change_rows(report.get('candidates', []))}</tbody></table></main></html>"""
+<tbody>{_change_rows(report.get('candidates', []))}</tbody></table>
+{f'<h2>{diagnostics}</h2><table><thead><tr><th>{code}</th><th>{message}</th><th>{suggestion}</th><th>{location}</th></tr></thead><tbody>{_finding_rows(report.get("findings", []) or report.get("warnings", []))}</tbody></table>' if report.get('findings') or report.get('warnings') else ''}
+</main></html>"""
     _atomic_text_write(path, body)

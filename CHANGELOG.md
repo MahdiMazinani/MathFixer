@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.0.0 — 2026-07-17
+
+- Added the stable public Python API v2 and read-only diagnostics Plugin SDK.
+- Added isolated third-party plugin discovery with API-major compatibility checks and failure containment.
+- Added bidirectional Word↔LaTeX project conversion with extracted media, resource paths, optional reference DOCX, staging and output validation.
+- Added OpenAI Responses, OpenAI-compatible private endpoint and local Ollama provider adapters; AI remains explicit and advisory.
+- Added offline `.mfxreview` collaboration bundles that exclude source files by default and an opt-in private-service upload boundary.
+- Added complete-project LaTeX repair that copies the project before changing included sources.
+- Expanded the desktop app with provider selection, complete-project mode, exact multi-file locations and PDF comparison.
+- Replaced the misleading single-fraction graphic with a complex scientific-document workflow illustration.
+- Rebuilt the English and Persian README files as full product, GUI, CLI, API, plugin, security and troubleshooting manuals.
+
+## 1.3.0 — 2026-07-17
+
+- Added bounded multi-file LaTeX workspace indexing for `input`, `include` and `subfile` sources.
+- Added project-wide citation/reference checks, duplicate-label detection and exact relative file/line evidence.
+- Improved TeX log parsing with nested-file and file-line-error locations.
+- Added safe JSON template adapters for licensed or user-provided university templates.
+- Added rendered PDF comparison with page geometry checks, pixel metrics, heatmaps and JSON regression output.
+- Added an Inno Setup installer workflow and optional Authenticode signing path when a certificate is configured.
+- Added diagnostics to readable HTML reports instead of exposing them only in JSON.
+
 ## 1.2.0 — 2026-07-16
 
 - Repositioned MathFixer as a formula repair and scientific document assistant.

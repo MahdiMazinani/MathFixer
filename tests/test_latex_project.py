@@ -27,6 +27,36 @@ class LatexProjectTests(unittest.TestCase):
             self.assertEqual(output.read_text(encoding="utf-8"), r"$x=\frac{1}{2}$")
             self.assertIn("Before", html.read_text(encoding="utf-8"))
 
+    def test_html_report_includes_diagnostics_and_exact_location(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory, "input.tex")
+            output = Path(directory, "fixed.tex")
+            html = Path(directory, "report.html")
+            source.write_text(r"\cite{missing}", encoding="utf-8")
+            repair_latex(source, output, html_report_path=html)
+            report = html.read_text(encoding="utf-8")
+            self.assertIn("MISSING_CITATION", report)
+            self.assertIn("input.tex:1", report)
+
+    def test_user_opt_out_and_override_are_applied_exactly(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory, "input.tex")
+            source.write_text(r"$\frac12$ and $\frac34$", encoding="utf-8")
+            scan = analyze_latex(source)
+            first, second = scan.changes
+            output = Path(directory, "fixed.tex")
+            report = repair_latex(
+                source,
+                output,
+                enabled_change_ids={second.change_id},
+                change_overrides={second.change_id: r"\frac{30}{40}"},
+            )
+            self.assertEqual(output.read_text(encoding="utf-8"), r"$\frac12$ and $\frac{30}{40}$")
+            self.assertFalse(report.changes[0].applied)
+            self.assertTrue(report.changes[1].applied)
+            self.assertEqual(report.converted, 1)
+            self.assertEqual(report.skipped, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
