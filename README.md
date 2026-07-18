@@ -20,8 +20,8 @@ MathFixer is not a generic text rewriter. Its primary job is **formula and scien
 
 | Your input | Use this workflow | Main output |
 |---|---|---|
-| Word `.docx` / `.docm` containing LaTeX or UnicodeMath | Scan → review → repair | Layout-preserved Word file with native Office Math |
-| Single `.tex` file | Scan → review → repair | Repaired copy plus HTML/JSON report |
+| Word `.docx` / `.docm` containing LaTeX or UnicodeMath | One-click **Scan & repair files** | Layout-preserved Word file with native Office Math |
+| Single `.tex` file | One-click **Scan & repair files** | Repaired copy plus HTML/JSON report |
 | Multi-file LaTeX thesis | Complete LaTeX project mode | Copied project with included sources repaired and cross-file diagnostics |
 | Word project that must become LaTeX | Project conversion | Standalone TEX plus extracted `media/` directory |
 | LaTeX project that must become Word | Project conversion | DOCX using project media and optional reference DOCX |
@@ -76,15 +76,17 @@ Detection does not modify the document.
 - **Atomic mode:** if any selected Word formula cannot be converted safely, publish nothing.
 - **Create PDF:** builds and validates a PDF when Word/LibreOffice/XeLaTeX is available.
 - **Export Word to LaTeX:** creates an additional LaTeX result.
-- **Optional AI diagnostics:** sends TEX text only after explicit opt-in.
+- **AI diagnostics:** **Off — recommended** makes no AI request. Selecting a provider explicitly sends TEX text and may wait up to 90 seconds.
 - **Complete LaTeX project:** follows safe local `\input`, `\include`, and `\subfile` references and repairs a copied project.
 - **Replace outputs:** allows an already existing output to be replaced.
 
-For a Persian thesis, select the compatibility profile that matches the user-provided template. Profile names are diagnostics, not official university templates or endorsements.
+Keep the thesis profile at **Off — no university template** for ordinary documents. Select a university only when its user-provided `.cls` or `.sty` is present. Profile names are diagnostics, not official templates or endorsements.
 
-### 4. Scan and review
+### 4. Scan and repair with one button
 
-Select **Scan & review**. The dashboard shows problems, repair candidates, warnings, and output counts. Double-click a row or use **Review selected**.
+Select **Scan & repair files** once. Detection, repair, validation, and output creation run in sequence. Word is scanned only once on the default path. If AI was explicitly enabled for TEX, its diagnostic preflight runs first and the status bar shows the waiting stage and timeout.
+
+After completion, the dashboard shows problems, repairs, warnings, and output counts. Double-click a row or use **Review selected**.
 
 For Word formulas you can:
 
@@ -99,11 +101,9 @@ For LaTeX projects the review includes:
 - missing citation/reference/package findings;
 - compilation-log, Persian, template, and plugin diagnostics.
 
-### 5. Start repair
+A successful Word output is published only after OOXML preservation validation. A complete LaTeX project is copied to a sibling output directory before included sources are changed.
 
-Select **Start repair**. A successful Word output is published only after OOXML preservation validation. A complete LaTeX project is copied to a sibling output directory before included sources are changed.
-
-### 6. Inspect the evidence
+### 5. Inspect the evidence
 
 Use **Change report** to open the HTML report. It includes:
 
@@ -220,7 +220,7 @@ Conversion between formats is not guaranteed to preserve every custom macro, flo
 
 ## Optional AI providers
 
-AI is advisory: it can explain errors and suggest actions but never applies a change automatically. It is off by default. Deterministic scanning remains available without a network connection or account.
+AI is advisory: it can explain errors and suggest actions but never applies a change automatically. The GUI selector explicitly defaults to **Off — recommended**; this makes no AI request. OpenAI, compatible, and Ollama choices affect TEX only and may wait for the 90-second timeout. Deterministic repair remains available without a network connection or account.
 
 ### OpenAI Responses provider
 

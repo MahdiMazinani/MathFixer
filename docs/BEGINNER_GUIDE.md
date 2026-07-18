@@ -5,11 +5,11 @@
 3. Double-click `MathFixer.exe`.
 4. Drop a `.docx`, `.docm`, or `.tex` document into the large selection area.
 5. Keep **Balanced** mode unless you want explicit delimiters only (**Safe**) or broader detection (**Aggressive**).
-6. Select **Scan & review**. Review Before, After, Reason and Location; disable any unwanted Word formula candidate.
+6. Keep AI at **Off — recommended** and thesis compatibility at **Off — no university template** unless you intentionally need them.
 7. Choose optional outputs: PDF, Word→LaTeX, and HTML/JSON report.
-8. Select **Start repair**. The original remains unchanged.
-9. Select **Change report** to inspect every automatic modification, or **Open output** to open its folder.
+8. Select **Scan & repair files** once. The original remains unchanged.
+9. Select **Change report** to inspect every automatic modification, **Review selected** for details, or **Open output** to open its folder.
 
-AI diagnostics are optional and off by default. They send document text to the configured OpenAI API and require `OPENAI_API_KEY`; do not enable them for confidential work unless permitted.
+AI diagnostics are optional and explicitly off by default. Selecting a provider sends TEX text to that provider and can wait up to 90 seconds; do not enable AI for confidential work unless permitted.
 
 For DOCM files, PDF export requires desktop Microsoft Word so VBA can be force-disabled. For TEX-to-PDF, XeLaTeX must be installed separately.

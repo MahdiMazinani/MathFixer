@@ -140,6 +140,8 @@ def scan_any_document(
     report = analyze_latex(path, thesis_profile=thesis_profile)
     if ai_enabled:
         try:
+            if progress:
+                progress(45, "Waiting for the optional AI provider (timeout: 90 seconds)")
             for item in analyze_latex_with_configured_provider(
                 path.read_text(encoding="utf-8", errors="replace"),
                 provider_name=ai_provider,
@@ -150,6 +152,8 @@ def scan_any_document(
                         line=item.line, severity=item.severity,
                     )
                 )
+            if progress:
+                progress(90, "AI diagnostics completed")
         except AIAnalysisError as exc:
             report.findings.append(LatexFinding("AI_UNAVAILABLE", str(exc), severity="warning"))
     report.detected = len(report.changes) + len(report.findings)
@@ -405,6 +409,7 @@ class MainWindow(QMainWindow):
         self.items: list[QueueItem] = []
         self.pool = QThreadPool.globalInstance()
         self._busy = False
+        self._convert_after_scan = False
         self.resize(1280, 840)
         self.setMinimumSize(900, 650)
         self._apply_theme()
@@ -425,8 +430,9 @@ class MainWindow(QMainWindow):
             self.settings.setValue("reports", self.reports.isChecked())
             self.settings.setValue("atomic", self.atomic.isChecked())
             self.settings.setValue("pdf", self.pdf_checkbox.isChecked())
-            self.settings.setValue("ai", self.ai_checkbox.isChecked())
-            self.settings.setValue("ai_provider", self.ai_provider.currentData())
+            ai_provider = str(self.ai_provider.currentData() or "off")
+            self.settings.setValue("ai", ai_provider != "off")
+            self.settings.setValue("ai_provider", ai_provider)
             self.settings.setValue("export_latex", self.export_latex_checkbox.isChecked())
             self.settings.setValue("latex_project", self.latex_project_checkbox.isChecked())
             self.settings.setValue("thesis_profile", self.thesis_profile.currentData())
@@ -564,13 +570,13 @@ class MainWindow(QMainWindow):
         self.pdf_checkbox.setChecked(self.settings.value("pdf", False, type=bool))
         self.export_latex_checkbox = QCheckBox(self.t("export_latex"))
         self.export_latex_checkbox.setChecked(self.settings.value("export_latex", False, type=bool))
-        self.ai_checkbox = QCheckBox(self.t("ai_analysis"))
-        self.ai_checkbox.setChecked(self.settings.value("ai", False, type=bool))
         self.ai_provider = QComboBox()
+        self.ai_provider.addItem(self.t("ai_off"), "off")
         self.ai_provider.addItem("OpenAI", "openai")
         self.ai_provider.addItem("OpenAI-compatible", "openai-compatible")
         self.ai_provider.addItem("Ollama (local)", "ollama")
-        saved_ai_provider = str(self.settings.value("ai_provider", "openai"))
+        saved_ai_enabled = self.settings.value("ai", False, type=bool)
+        saved_ai_provider = str(self.settings.value("ai_provider", "off")) if saved_ai_enabled else "off"
         self.ai_provider.setCurrentIndex(max(0, self.ai_provider.findData(saved_ai_provider)))
         self.latex_project_checkbox = QCheckBox(self.t("latex_project_mode"))
         self.latex_project_checkbox.setChecked(self.settings.value("latex_project", True, type=bool))
@@ -580,8 +586,12 @@ class MainWindow(QMainWindow):
         side_layout.addWidget(self.atomic)
         side_layout.addWidget(self.pdf_checkbox)
         side_layout.addWidget(self.export_latex_checkbox)
-        side_layout.addWidget(self.ai_checkbox)
+        side_layout.addWidget(QLabel(self.t("ai_analysis")))
         side_layout.addWidget(self.ai_provider)
+        ai_note = QLabel(self.t("ai_note"))
+        ai_note.setWordWrap(True)
+        ai_note.setObjectName("subtitle")
+        side_layout.addWidget(ai_note)
         side_layout.addWidget(self.latex_project_checkbox)
         pdf_note = QLabel(self.t("pdf_note"))
         pdf_note.setWordWrap(True)
@@ -591,7 +601,10 @@ class MainWindow(QMainWindow):
 
         side_layout.addWidget(QLabel(self.t("thesis_profile")))
         self.thesis_profile = QComboBox()
+        self.thesis_profile.addItem(self.t("thesis_none"), "generic")
         for profile in THESIS_PROFILES:
+            if profile.key == "generic":
+                continue
             self.thesis_profile.addItem(profile.title_fa if self.language == "fa" else profile.title_en, profile.key)
         saved_profile = str(self.settings.value("thesis_profile", "generic"))
         self.thesis_profile.setCurrentIndex(max(0, self.thesis_profile.findData(saved_profile)))
@@ -605,13 +618,10 @@ class MainWindow(QMainWindow):
         side_layout.addWidget(self.output_dir)
         side_layout.addWidget(browse_output)
         side_layout.addStretch()
-        self.scan_button = QPushButton(self.t("scan_review"))
-        self.scan_button.clicked.connect(self.scan_all)
-        self.convert_button = QPushButton(self.t("start_repair"))
-        self.convert_button.setObjectName("primary")
-        self.convert_button.clicked.connect(self.convert_all)
-        side_layout.addWidget(self.scan_button)
-        side_layout.addWidget(self.convert_button)
+        self.process_button = QPushButton(self.t("scan_and_repair"))
+        self.process_button.setObjectName("primary")
+        self.process_button.clicked.connect(self.process_all)
+        side_layout.addWidget(self.process_button)
 
         splitter.addWidget(left)
         side_scroll = QScrollArea()
@@ -757,8 +767,7 @@ class MainWindow(QMainWindow):
                     cell.setToolTip(item.error)
                 self.queue.setItem(row, column, cell)
         enabled = bool(self.items) and not self._busy
-        self.scan_button.setEnabled(enabled)
-        self.convert_button.setEnabled(enabled)
+        self.process_button.setEnabled(enabled)
         if hasattr(self, "metric_values"):
             found = sum(len(item.candidates) + len(item.findings) for item in self.items)
             fixed = sum(
@@ -825,7 +834,11 @@ class MainWindow(QMainWindow):
 
     def _on_progress(self, value: int, _technical_text: str) -> None:
         self.progress.setValue(value)
-        self.status_label.setText(self.t("processing", value=value))
+        detail = _technical_text.strip()
+        if detail:
+            self.status_label.setText(self.t("processing_detail", value=value, detail=detail))
+        else:
+            self.status_label.setText(self.t("processing", value=value))
 
     def _on_error(self, message: str) -> None:
         self._set_busy(False)
@@ -835,16 +848,42 @@ class MainWindow(QMainWindow):
     def scan_all(self) -> None:
         if self.items:
             self._capture_settings()
+            self._convert_after_scan = False
             self._scan_next(0)
 
+    def process_all(self) -> None:
+        """Run the normal one-click path and avoid scanning Word documents twice."""
+        if not self.items:
+            return
+        self._capture_settings()
+        ai_provider = str(self.ai_provider.currentData() or "off")
+        self._convert_after_scan = ai_provider != "off" and any(
+            item.path.suffix.lower() == ".tex" for item in self.items
+        )
+        if self._convert_after_scan:
+            self._scan_next(0)
+        else:
+            self._convert_next(0)
+
     def _scan_next(self, index: int) -> None:
+        while (
+            self._convert_after_scan
+            and index < len(self.items)
+            and self.items[index].path.suffix.lower() != ".tex"
+        ):
+            index += 1
         if index >= len(self.items):
-            self._set_busy(False)
             total = sum(len(item.candidates) + len(item.findings) for item in self.items)
             repairs = sum(sum(bool(candidate.repairs) for candidate in item.candidates) for item in self.items)
-            self.progress.setValue(100)
-            self.status_label.setText(self.t("scan_complete", total=total, repairs=repairs))
-            self.refresh_queue()
+            if self._convert_after_scan:
+                self._convert_after_scan = False
+                self.status_label.setText(self.t("scan_then_repair"))
+                self._convert_next(0)
+            else:
+                self._set_busy(False)
+                self.progress.setValue(100)
+                self.status_label.setText(self.t("scan_complete", total=total, repairs=repairs))
+                self.refresh_queue()
             return
         item = self.items[index]
         item.status_key = "state_scanning"
@@ -855,14 +894,12 @@ class MainWindow(QMainWindow):
             item.path,
             on_error=lambda message, i=index: self._scan_failed(i, message),
             mode=self.selected_mode,
-            ai_enabled=self.ai_checkbox.isChecked(),
-            ai_provider=str(self.ai_provider.currentData()),
+            ai_enabled=str(self.ai_provider.currentData() or "off") != "off",
+            ai_provider=str(self.ai_provider.currentData() or "openai"),
             thesis_profile=str(self.thesis_profile.currentData()),
         )
 
-    def _scan_completed(self, index: int, result) -> None:
-        item = self.items[index]
-        report = result.report
+    def _store_report_on_item(self, item: QueueItem, report) -> None:
         if isinstance(report, LatexReport):
             item.candidates = [
                 FormulaCandidate(
@@ -878,13 +915,17 @@ class MainWindow(QMainWindow):
                     repairs=[change.reason],
                     candidate_id=change.change_id,
                 )
-                for position, change in enumerate(report.changes)
+                for change in report.changes
             ]
             item.findings = report.findings
         else:
             item.candidates = report.candidates
             item.findings = []
         item.enabled_ids = {candidate.candidate_id for candidate in item.candidates}
+
+    def _scan_completed(self, index: int, result) -> None:
+        item = self.items[index]
+        self._store_report_on_item(item, result.report)
         item.status_key = "state_scanned"
         self._set_busy(False)
         self.refresh_queue()
@@ -899,9 +940,7 @@ class MainWindow(QMainWindow):
         self._scan_next(index + 1)
 
     def convert_all(self) -> None:
-        if self.items:
-            self._capture_settings()
-            self._convert_next(0)
+        self.process_all()
 
     def _convert_next(self, index: int) -> None:
         if index >= len(self.items):
@@ -1009,8 +1048,7 @@ class MainWindow(QMainWindow):
             report, latex_output = result
         else:
             report = result
-        if hasattr(report, "candidates"):
-            item.candidates = report.candidates
+        self._store_report_on_item(item, report)
         item.status_key = "state_completed"
         item.output = output
         item.pdf_output = Path(report.pdf_path) if report.pdf_path else None

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.1 — 2026-07-18
+
+- Replaced the confusing two-button desktop scan/convert flow with one **Scan & repair files** action.
+- Added explicit **Off — recommended** AI selection and **Off — no university template** thesis selection.
+- Avoided the redundant Word pre-scan in the default one-click path.
+- Added visible operation details and the 90-second AI wait limit to the progress status.
+- Updated English/Persian README files, beginner guides, quick help and the UI preview for the new workflow.
+
 ## 2.0.0 — 2026-07-17
 
 - Added the stable public Python API v2 and read-only diagnostics Plugin SDK.
