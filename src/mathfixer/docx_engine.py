@@ -98,6 +98,14 @@ def _count_native_math(root: etree._Element) -> int:
     return len(root.xpath(".//m:oMath", namespaces=NS))
 
 
+def _invalid_word_omml_placements(root: etree._Element) -> list[etree._Element]:
+    """Return math containers that Microsoft Word rejects outside w:p."""
+    return root.xpath(
+        ".//m:oMathPara[not(ancestor::w:p)] | .//m:oMath[not(ancestor::w:p)]",
+        namespaces=NS,
+    )
+
+
 def scan_document(
     input_path: str | os.PathLike[str],
     *,
@@ -203,19 +211,26 @@ def _replace_span(
     if not affected or any(not _paragraph_child_is_replaceable(child) for child in affected):
         return False, "formula crosses a field, hyperlink, bookmark, drawing, or complex Word run", False
 
-    # A display equation that owns the complete paragraph is represented by the
-    # block-level m:oMathPara element expected by Word. Embedded display markers
+    # Word requires both m:oMathPara and m:oMath to remain inside a w:p. A display
+    # equation that owns the complete paragraph therefore replaces the paragraph's
+    # inline content, never the w:p container itself. Embedded display markers
     # remain inline so surrounding prose and paragraph properties are preserved.
     block_math = omath.tag == f"{M}oMathPara"
     visible = _paragraph_text(paragraph)
-    if block_math and not visible[: candidate.start].strip() and not visible[candidate.end :].strip():
-        parent = paragraph.getparent()
-        if parent is not None and all(
-            child.tag == f"{W}pPr" or _paragraph_child_is_replaceable(child)
-            for child in list(paragraph)
-        ):
-            parent.replace(paragraph, copy.deepcopy(omath))
-            return True, "", True
+    owns_entire_paragraph = (
+        block_math
+        and not visible[: candidate.start].strip()
+        and not visible[candidate.end :].strip()
+    )
+    if owns_entire_paragraph and all(
+        child.tag == f"{W}pPr" or _paragraph_child_is_replaceable(child)
+        for child in list(paragraph)
+    ):
+        for child in list(paragraph):
+            if child.tag != f"{W}pPr":
+                paragraph.remove(child)
+        paragraph.append(copy.deepcopy(omath))
+        return True, "", True
     if block_math:
         inline = omath.find(f"{M}oMath")
         if inline is None:
@@ -295,6 +310,14 @@ def _validate_output(
     unchanged_parts = all(
         after.unchanged_crc.get(name) == crc for name, crc in before.unchanged_crc.items()
     )
+    content_types_preserved = after.unchanged_crc.get("[Content_Types].xml") == (
+        before.unchanged_crc.get("[Content_Types].xml")
+    )
+    relationship_parts = [name for name in before.unchanged_crc if name.endswith(".rels")]
+    relationships_preserved = all(
+        after.unchanged_crc.get(name) == before.unchanged_crc[name]
+        for name in relationship_parts
+    )
     package_ok = before.entries == after.entries
     native_math_before = 0
     with ZipFile(input_path) as archive:
@@ -303,20 +326,39 @@ def _validate_output(
     with ZipFile(output_path) as archive:
         bad_member = archive.testzip()
         native_math = 0
+        invalid_omml_placements: list[str] = []
         for name in _story_names(archive):
             root = parse_xml(archive.read(name))
             native_math += _count_native_math(root)
+            invalid_omml_placements.extend(
+                f"{name}:{etree.QName(node).localname}"
+                for node in _invalid_word_omml_placements(root)
+            )
     math_delta_ok = native_math - native_math_before == expected_new_math
-    valid = package_ok and unchanged_parts and all(structures.values()) and bad_member is None and math_delta_ok
+    word_omml_placement_valid = not invalid_omml_placements
+    valid = (
+        package_ok
+        and unchanged_parts
+        and content_types_preserved
+        and relationships_preserved
+        and all(structures.values())
+        and bad_member is None
+        and math_delta_ok
+        and word_omml_placement_valid
+    )
     return {
         "valid": valid,
         "zip_integrity": bad_member is None,
         "entry_set_preserved": package_ok,
         "unmodified_parts_byte_identical": unchanged_parts,
+        "content_types_preserved": content_types_preserved,
+        "relationships_preserved": relationships_preserved,
         "structures_preserved": structures,
         "native_math_objects": native_math,
         "native_math_delta": native_math - native_math_before,
         "native_math_delta_valid": math_delta_ok,
+        "word_omml_placement_valid": word_omml_placement_valid,
+        "invalid_omml_placements": invalid_omml_placements,
         "modified_parts": sorted(modified_parts),
     }
 

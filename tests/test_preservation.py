@@ -8,6 +8,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from lxml import etree
 
 from mathfixer import DetectionMode, convert_document
+from mathfixer.docx_engine import _invalid_word_omml_placements, _validate_output
 
 CONTENT_TYPES = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -58,6 +59,10 @@ class PreservationTests(unittest.TestCase):
             self.assertEqual(report.warnings, [])
             self.assertTrue(report.validation["valid"])
             self.assertEqual(report.validation["native_math_objects"], 3)
+            self.assertTrue(report.validation["word_omml_placement_valid"])
+            self.assertEqual(report.validation["invalid_omml_placements"], [])
+            self.assertTrue(report.validation["content_types_preserved"])
+            self.assertTrue(report.validation["relationships_preserved"])
             with ZipFile(source) as before, ZipFile(output) as after:
                 self.assertEqual(set(before.namelist()), set(after.namelist()))
                 self.assertEqual(after.read("word/media/image1.bin"), media)
@@ -71,6 +76,59 @@ class PreservationTests(unittest.TestCase):
                 self.assertEqual(len(root.xpath(".//w:tbl", namespaces=namespaces)), 1)
                 self.assertEqual(len(root.xpath(".//w:sectPr", namespaces=namespaces)), 1)
                 self.assertEqual(len(root.xpath(".//m:oMathPara", namespaces=namespaces)), 1)
+                self.assertEqual(
+                    len(root.xpath(".//w:p/m:oMathPara", namespaces=namespaces)),
+                    1,
+                )
+                self.assertEqual(_invalid_word_omml_placements(root), [])
+
+    def test_word_incompatible_math_outside_paragraph_is_detected(self):
+        invalid = etree.fromstring(
+            b'''<w:document
+ xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+ xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">
+  <w:body><m:oMathPara><m:oMath/></m:oMathPara></w:body>
+</w:document>'''
+        )
+
+        issues = _invalid_word_omml_placements(invalid)
+
+        self.assertEqual([etree.QName(node).localname for node in issues], ["oMathPara", "oMath"])
+
+    def test_word_incompatible_math_blocks_output_validation(self):
+        plain_document = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+ xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">
+  <w:body><w:p><w:r><w:t>$$x^2$$</w:t></w:r></w:p><w:sectPr/></w:body>
+</w:document>'''
+        incompatible_document = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+ xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">
+  <w:body><m:oMathPara><m:oMath><m:r><m:t>x</m:t></m:r></m:oMath></m:oMathPara><w:sectPr/></w:body>
+</w:document>'''
+        plain_header = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p><w:r><w:t>Ordinary header.</w:t></w:r></w:p>
+</w:hdr>'''
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory, "source.docx")
+            output = Path(directory, "incompatible.docx")
+            self.write_source(source, plain_document, plain_header)
+            self.write_source(output, incompatible_document, plain_header)
+
+            validation = _validate_output(
+                source,
+                output,
+                {"word/document.xml"},
+                expected_new_math=1,
+            )
+
+            self.assertFalse(validation["valid"])
+            self.assertFalse(validation["word_omml_placement_valid"])
+            self.assertEqual(
+                validation["invalid_omml_placements"],
+                ["word/document.xml:oMathPara", "word/document.xml:oMath"],
+            )
 
     def test_pdf_failure_does_not_publish_partial_docx(self):
         with tempfile.TemporaryDirectory() as directory:

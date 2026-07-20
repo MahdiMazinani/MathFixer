@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.8 — 2026-07-20
+
+- Fixed DOCX outputs that Google Docs could recover but Microsoft Word refused to open.
+- Kept display `m:oMathPara` and all `m:oMath` containers inside their required `w:p` paragraph instead of replacing the paragraph with an invalid top-level math element.
+- Preserved paragraph properties while replacing only the display-formula text content.
+- Added a Word-specific OMML placement gate: an incompatible math container now aborts atomic publication instead of producing a file that Word rejects.
+- Exposed explicit Content Types and relationship-preservation results in the validation report.
+- Extended both integration and frozen Windows GUI smoke tests to reject Office Math outside `w:p`.
+
 ## 2.0.7 — 2026-07-20
 
 - Fixed valid formulas being rejected when Word split their text across runs separated by generated spelling/grammar proofing anchors.
