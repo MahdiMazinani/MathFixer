@@ -1,7 +1,9 @@
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
+from zipfile import ZipFile
 
+from lxml import etree
 from PySide6.QtCore import QEventLoop, QSettings, QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox
 from smoke_document import write_smoke_document
@@ -60,6 +62,16 @@ def run_real_conversion(app: QApplication) -> None:
         assert window.items[0].output is not None
         assert window.items[0].output.exists()
         assert window.items[0].output.name == "small-formulas_mathfixed_2.docx"
+        with ZipFile(window.items[0].output) as archive:
+            root = etree.fromstring(archive.read("word/document.xml"))
+        namespaces = {
+            "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+            "m": "http://schemas.openxmlformats.org/officeDocument/2006/math",
+        }
+        assert not root.xpath(
+            ".//m:oMathPara[not(ancestor::w:p)] | .//m:oMath[not(ancestor::w:p)]",
+            namespaces=namespaces,
+        ), "Microsoft Word rejects Office Math containers outside w:p"
         assert occupied.read_bytes() == b"existing output must not be replaced"
         assert window.items[0].progress_value == 100
         assert not window._workers, "finished TaskWorker was not released"

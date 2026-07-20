@@ -344,6 +344,7 @@ Ambiguous candidates require human review.
 | `Text-preservation check failed` in a paragraph | Install 2.0.5 or later. Earlier builds could misalign a formula when a hyperlink, smart tag or tracked-change wrapper appeared before it. The original was protected and never changed |
 | Non-atomic mode still stops after it skips a complex formula | Install 2.0.6 or later. Skipped formulas now stay untouched while other safe formulas are converted and the output is published with a warning |
 | Many valid formulas are reported as complex Word runs | Install 2.0.7 or later. Word-generated proofing and rendered-page markers no longer block safe native-math conversion |
+| Google Docs opens the output but Microsoft Word reports an error | Install 2.0.8 or later. Older builds could place display Office Math outside its required Word paragraph. Version 2.0.8 keeps OMML inside `w:p` and refuses to publish an incompatible package |
 
 ## Command-line cookbook
 
@@ -467,6 +468,7 @@ For signing, pass a PFX path/password to `build_installer.ps1`. GitHub Actions r
 - **v1.3 scope:** multi-file evidence, exact log locations, template adapters, visual PDF regression, installer/signing integration.
 - **v2.0 scope:** stable plugin/API contract, bidirectional project conversion with media, private/local AI providers, and opt-in collaboration bundles.
 - **v2.0.3 reliability patch:** bounded Pandoc conversion, retained GUI workers, visible processing stages, and frozen-EXE conversion smoke coverage.
+- **v2.0.8 Microsoft Word compatibility patch:** display OMML remains inside `w:p`, with a strict pre-publication placement gate.
 - **v2.0.7 Word metadata patch:** generated proofing and rendered-page markers no longer cause valid formulas split across ordinary runs to be rejected.
 - **v2.0.6 non-atomic patch:** skipped complex formulas remain unchanged while safe formulas continue and a validated output is produced.
 - **v2.0.5 Word preservation patch:** consistent offsets around hyperlinks and tracked changes, with localized safety-stop explanations.
