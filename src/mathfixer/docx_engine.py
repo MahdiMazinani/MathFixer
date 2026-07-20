@@ -32,6 +32,13 @@ XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
 W = f"{{{W_NS}}}"
 M = f"{{{M_NS}}}"
 ALLOWED_RUN_CHILDREN = {f"{W}rPr", f"{W}t"}
+# Word may split otherwise ordinary text into many runs and place non-visible,
+# recalculable metadata between or inside them. These nodes do not contribute to
+# the paragraph text stream and can be discarded when their text is replaced by
+# native Office Math. Authored structures such as fields, bookmarks, hyperlinks,
+# drawings and hard breaks deliberately remain outside these allow-lists.
+DISCARDABLE_RUN_CHILDREN = {f"{W}lastRenderedPageBreak"}
+DISCARDABLE_PARAGRAPH_CHILDREN = {f"{W}proofErr"}
 INLINE_TEXT_WRAPPERS = {
     f"{W}hyperlink",
     f"{W}smartTag",
@@ -142,7 +149,14 @@ def scan_document(
 def _run_is_safe(run: etree._Element) -> bool:
     if run.tag != f"{W}r":
         return False
-    return all(child.tag in ALLOWED_RUN_CHILDREN for child in run)
+    return all(
+        child.tag in ALLOWED_RUN_CHILDREN or child.tag in DISCARDABLE_RUN_CHILDREN
+        for child in run
+    )
+
+
+def _paragraph_child_is_replaceable(child: etree._Element) -> bool:
+    return _run_is_safe(child) or child.tag in DISCARDABLE_PARAGRAPH_CHILDREN
 
 
 def _run_text(run: etree._Element) -> str:
@@ -186,7 +200,7 @@ def _replace_span(
     first_start, _, first_index, first_run = first
     last_start, _, last_index, last_run = last
     affected = children[first_index : last_index + 1]
-    if not affected or any(not _run_is_safe(child) for child in affected):
+    if not affected or any(not _paragraph_child_is_replaceable(child) for child in affected):
         return False, "formula crosses a field, hyperlink, bookmark, drawing, or complex Word run", False
 
     # A display equation that owns the complete paragraph is represented by the
@@ -197,7 +211,8 @@ def _replace_span(
     if block_math and not visible[: candidate.start].strip() and not visible[candidate.end :].strip():
         parent = paragraph.getparent()
         if parent is not None and all(
-            child.tag == f"{W}pPr" or _run_is_safe(child) for child in list(paragraph)
+            child.tag == f"{W}pPr" or _paragraph_child_is_replaceable(child)
+            for child in list(paragraph)
         ):
             parent.replace(paragraph, copy.deepcopy(omath))
             return True, "", True
@@ -224,6 +239,13 @@ def _replace_span(
     suffix_run = _clone_run_with_text(last_run, suffix)
     if suffix_run is not None:
         paragraph.insert(insertion, suffix_run)
+    # Proofing anchors are Word-generated caches without stable identifiers. If
+    # one boundary was inside the replaced formula, keeping the other boundary
+    # would leave stale proofing markup around ordinary text. Word safely rebuilds
+    # these anchors when the document is opened, so remove them from this paragraph.
+    for child in list(paragraph):
+        if child.tag in DISCARDABLE_PARAGRAPH_CHILDREN:
+            paragraph.remove(child)
     return True, "", False
 
 

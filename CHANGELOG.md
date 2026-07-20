@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.7 — 2026-07-20
+
+- Fixed valid formulas being rejected when Word split their text across runs separated by generated spelling/grammar proofing anchors.
+- Allowed Word's recalculable `lastRenderedPageBreak` cache marker inside otherwise safe formula runs without weakening protection for fields, hyperlinks, bookmarks, drawings or authored breaks.
+- Removed stale proofing anchors from a patched paragraph so Word can rebuild them around the remaining prose.
+- Added regression coverage for inline and display formulas split across generated proofing and layout markers.
+
 ## 2.0.6 — 2026-07-18
 
 - Fixed non-atomic Word conversion incorrectly failing its final text-preservation check after safely skipping an uneditable formula.

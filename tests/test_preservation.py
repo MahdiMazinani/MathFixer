@@ -165,6 +165,55 @@ class PreservationTests(unittest.TestCase):
             text = "".join(root.xpath(".//w:t/text()", namespaces={"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}))
             self.assertEqual(text, "Link before  and ordinary trailing text.")
 
+    def test_word_generated_proofing_and_layout_markers_do_not_block_conversion(self):
+        generated_metadata_document = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+ xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">
+  <w:body>
+    <w:p>
+      <w:r><w:lastRenderedPageBreak/><w:t>Before $x^</w:t></w:r>
+      <w:proofErr w:type="spellStart"/>
+      <w:r><w:t>2 + \\frac</w:t></w:r>
+      <w:proofErr w:type="spellEnd"/>
+      <w:r><w:t>{1}{2}$ after</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>$$y =</w:t></w:r>
+      <w:proofErr w:type="spellStart"/>
+      <w:r><w:t> \\sqrt{x}</w:t></w:r>
+      <w:proofErr w:type="spellEnd"/>
+      <w:r><w:t>$$</w:t></w:r>
+    </w:p>
+    <w:sectPr/>
+  </w:body>
+</w:document>'''
+        plain_header = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p><w:r><w:t>Ordinary header.</w:t></w:r></w:p>
+</w:hdr>'''
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory, "generated-metadata.docx")
+            output = Path(directory, "generated-metadata_mathfixed.docx")
+            self.write_source(source, generated_metadata_document, plain_header)
+
+            report = convert_document(source, output, mode=DetectionMode.BALANCED)
+
+            self.assertTrue(report.success)
+            self.assertEqual(report.detected, 2)
+            self.assertEqual(report.converted, 2)
+            self.assertEqual(report.skipped, 0)
+            self.assertEqual(report.warnings, [])
+            with ZipFile(output) as archive:
+                root = etree.fromstring(archive.read("word/document.xml"))
+            namespaces = {
+                "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+                "m": "http://schemas.openxmlformats.org/officeDocument/2006/math",
+            }
+            text = "".join(root.xpath(".//w:t/text()", namespaces=namespaces))
+            self.assertEqual(text, "Before  after")
+            self.assertEqual(len(root.xpath(".//m:oMath", namespaces=namespaces)), 2)
+            self.assertEqual(len(root.xpath(".//w:proofErr", namespaces=namespaces)), 0)
+
     def test_non_atomic_mode_preserves_a_formula_that_is_unsafe_to_replace(self):
         mixed_document = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
